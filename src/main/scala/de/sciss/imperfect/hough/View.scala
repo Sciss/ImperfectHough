@@ -11,7 +11,8 @@ import de.sciss.imperfect.hough.Analyze.Line
 import scala.collection.immutable.{IndexedSeq => Vec}
 
 object View {
-  final case class Config(verbose: Boolean = false, screenId: String = "", listScreens: Boolean = false)
+  final case class Config(verbose: Boolean = false, screenId: String = "", listScreens: Boolean = false,
+                          useGrabber: Boolean = false)
 
   def main(args: Array[String]): Unit = {
     val p = new scopt.OptionParser[Config]("Imperfect-RaspiPlayer") {
@@ -35,6 +36,10 @@ object View {
 
       opt[Unit] ('v', "verbose")
         .action   { (v, c) => c.copy(verbose = true) }
+
+      opt[Unit] ('g', "grabber")
+        .text ("Use video grabber instead of reading files")
+        .action   { (v, c) => c.copy(useGrabber = true) }
     }
     p.parse(args, Config()).fold(sys.exit(1)) { config =>
       if (config.listScreens) {
@@ -42,7 +47,7 @@ object View {
         sys.exit()
       }
 
-      Test.main(args)
+      Test.main(config)
       EventQueue.invokeLater(new Runnable { def run(): Unit = View.run(config) })
     }
   }
@@ -88,6 +93,7 @@ object View {
         e.getKeyCode match {
           case KeyEvent.VK_ESCAPE => quit()
           case KeyEvent.VK_R      => drawRect = !drawRect // ; w.repaint()
+          case KeyEvent.VK_T      => drawText = !drawText
           case KeyEvent.VK_A      => animate  = !animate
           case _ =>
         }
@@ -155,10 +161,11 @@ object View {
     t.start()
   }
 
-  private[this] val fntTest  = new Font(Font.SANS_SERIF, Font.BOLD, 500)
-  private[this] var drawRect = false
-  private[this] var animate  = true
-  private[this] var frameIdx = 0
+  private[this] val fntTest   = new Font(Font.SANS_SERIF, Font.BOLD, 500)
+  private[this] var drawRect  = false
+  private[this] var drawText  = false
+  private[this] var animate   = true
+  private[this] var frameIdx  = 0
 
   @volatile
   var lines = Vec.empty[Line]
@@ -168,20 +175,29 @@ object View {
     g.setColor(Color.black)
     g.fillRect(0, 0, VisibleWidth, VisibleHeight)
 
-    val atOrig = g.getTransform
-//    val rot = frameIdx * Math.PI / 180
-//    g2.rotate(rot, VisibleWidth/2, VisibleHeight/2)
-    g.setColor(Color.white)
-    g.setStroke(new BasicStroke(2f))
-    g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-    lines.foreach { case Line(pt1, pt2) =>
-      g.drawLine(pt1.x, pt1.y, pt2.x, pt2.y)
+    if (drawText) {
+      val atOrig = g.getTransform
+      val rot = frameIdx * Math.PI / 180
+      g.rotate(rot, VisibleWidth/2, VisibleHeight/2)
+      g.setColor(Color.white)
+      g.setFont(fntTest)
+      val fm = g.getFontMetrics
+      g.drawString("Imperfect Reconstruction", 20, fm.getAscent + 20)
+      g.setTransform(atOrig)
     }
 
-//    g2.setFont(fntTest)
-//    val fm = g2.getFontMetrics
-//    g2.drawString("Imperfect Reconstruction", 20, fm.getAscent + 20)
-    g.setTransform(atOrig)
+    {
+      val atOrig = g.getTransform
+      g.scale(1.0, 540.0 / 1280)
+      g.translate((frameIdx * 4) % 1920, 0)
+      g.setColor(Color.white)
+      g.setStroke(new BasicStroke(2f))
+      g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+      lines.foreach { case Line(pt1, pt2) =>
+        g.drawLine(pt1.x, pt1.y, pt2.x, pt2.y)
+      }
+      g.setTransform(atOrig)
+    }
 
     if (drawRect) {
       g.fillRect(0, 0, VisibleWidth, 10)

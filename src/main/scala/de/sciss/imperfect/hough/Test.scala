@@ -6,9 +6,9 @@ import de.sciss.imperfect.hough.Analyze.Line
 import scala.collection.immutable.{IndexedSeq => Vec}
 
 object Test {
-  def main(args: Array[String]): Unit = {
+  def main(config: View.Config): Unit = {
     val system  = ActorSystem("system")
-    val sourceP = Source.props()
+    val sourceP = if (config.useGrabber) Source.live() else Source.files()
     val source  = system.actorOf(sourceP, "source")
     val testP   = props(source)
     val test    = system.actorOf(testP, "test")

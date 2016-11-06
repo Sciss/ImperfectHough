@@ -15,102 +15,115 @@ package de.sciss.imperfect.hough
 
 import akka.actor.{Actor, Props}
 import akka.event.Logging
+import de.sciss.file._
+import de.sciss.imperfect.hough.Analyze.Line
+import de.sciss.kollflitz.Vec
 import org.bytedeco.javacpp.indexer.FloatRawIndexer
 import org.bytedeco.javacpp.opencv_core.{Mat, Size}
-import org.bytedeco.javacpp.{opencv_core, opencv_imgproc}
+import org.bytedeco.javacpp.{opencv_core, opencv_imgcodecs, opencv_imgproc}
 import org.bytedeco.javacv.FrameGrabber.ImageMode
-import org.bytedeco.javacv.{OpenCVFrameConverter, OpenCVFrameGrabber}
+import org.bytedeco.javacv.{Frame, OpenCVFrameConverter, OpenCVFrameGrabber}
 
 object Source {
   final case class Open(width: Int, height: Int)
   case object Task
   case object Close
 
-  def props(): Props = Props(new Source)
+  def live (): Props = Props(new SourceLive)
+  def files(): Props = Props(new SourceFiles)
 }
-final class Source extends Actor {
+abstract class SourceLike {
+  _: Actor =>
+
+  protected final val toMat   = new OpenCVFrameConverter.ToMat
+  private[this]   val anaCfg  = Analyze.Config()
+
+  def analyze(frame: Frame): Vec[Line] = {
+    val matIn = toMat.convert(frame)
+    val edge  = new Mat
+    val blur  = new Mat
+    val gray  = new Mat
+    //      val canny = new Mat
+    // void cv::Sobel(InputArray src, OutputArray dst, int ddepth, int dx, int dy,
+    //                int ksize = 3, double scale = 1, double delta = 0, int borderType = BORDER_DEFAULT
+    //      opencv_imgproc.Sobel(/* src = */ matIn, /* dst = */ sobel, /* ddepth = */ opencv_core.CV_32F,
+    //        /* dx = */ 1, /* dy = */ 1, /* ksize = */ 3, /* scale = */ 1.0,
+    //        /* delta = */ 0.0, /* borderType = */ opencv_core.BORDER_DEFAULT)
+    //      opencv_imgproc.GaussianBlur(???, ???, ???, ???)
+    //      opencv_imgproc.cvtColor(matIn, gray, opencv_imgproc.COLOR_BGR2GRAY)
+    //      opencv_imgproc.Canny(gray, canny, 40.0 /* 80.0 */ /* 40.0 */, 200.0, 3, false)
+    //      // XXX TODO --- hough only accepts gray -- binary output of canny fails
+
+    opencv_imgproc.medianBlur(matIn, matIn, 3)
+    opencv_imgproc.Laplacian(matIn, edge, opencv_core.CV_32F, 5 /* 3 */, 1.0, 0.0, opencv_core.BORDER_REPLICATE)
+    opencv_imgproc.GaussianBlur(edge, blur, new Size(5, 5), 1.0)
+    //  opencv_core.normalize(blur, blur)
+    opencv_imgproc.cvtColor(blur, gray, opencv_imgproc.COLOR_BGR2GRAY)
+    //  opencv_imgproc.Canny(canny, canny, 80.0 /* 40.0 */, 200.0, 3, false)
+    //  opencv_imgproc.equalizeHist(gray, gray)
+
+    //  val minPtr = new DoublePointer(1)
+    //  val maxPtr = new DoublePointer(1)
+    //  opencv_core.minMaxLoc(gray, minPtr, maxPtr, null, null, null)
+    //  println(s"min = ${minPtr.get()}; max = ${maxPtr.get()}")
+
+    val indexer = gray.createIndexer[FloatRawIndexer]()
+    //  println(s"sizes = ${indexer.sizes().mkString("[", ", ", "]")}")
+    // var min     = Float.MaxValue
+    // var max     = Float.MinValue
+    val thresh  = 127f
+    var y       = 0
+    val width   = frame.imageWidth
+    val height  = frame.imageHeight
+    while (y < height) {
+      var x = 0
+      while (x < width) {
+        val v = indexer.get(y, x, 0)
+        // if (v < min) min = v
+        // if (v > max) max = v
+        val b = if (v > thresh) 255f else 0f
+        indexer.put(y, x, b)
+        x += 1
+      }
+      y += 1
+    }
+
+    //      println(s"TYPE = ${gray.`type`()}")
+    val gray8 = new Mat
+    gray.convertTo(gray8, opencv_core.CV_8U)
+    val res = Analyze.run(gray8 /* canny */, anaCfg)
+
+    //      var minX, minY, maxX, maxY = 0
+    //      res.foreach { ln =>
+    //        val x1 = ln.pt1.x
+    //        val y1 = ln.pt1.y
+    //        val x2 = ln.pt2.x
+    //        val y2 = ln.pt2.y
+    //        if (x1 < minX) minX = x1
+    //        if (x1 > maxX) maxX = x1
+    //        if (y1 < minX) minX = y1
+    //        if (y1 > maxX) maxX = y1
+    //        if (x2 < minY) minY = x2
+    //        if (x2 > maxY) maxY = x2
+    //        if (y2 < minY) minY = y2
+    //        if (y2 > maxY) maxY = y2
+    //      }
+    //      log.debug(s"analysis yielded ${res.size} lines ($minX, $minY, $maxX, $maxY)")
+
+    res
+  }
+}
+final class SourceLive extends SourceLike with Actor {
   import Source._
 
   private[this] val log     = Logging(context.system, this)
   private[this] val grabber = new OpenCVFrameGrabber(0)
-  private[this] val toMat   = new OpenCVFrameConverter.ToMat
-  private[this] val anaCfg  = Analyze.Config()
 
   def receive: Receive = {
     case Task =>
       // grabber.trigger()
       val frame = grabber.grab()
-      val matIn = toMat.convert(frame)
-      val edge  = new Mat
-      val blur  = new Mat
-      val gray  = new Mat
-//      val canny = new Mat
-      // void cv::Sobel(InputArray src, OutputArray dst, int ddepth, int dx, int dy,
-      //                int ksize = 3, double scale = 1, double delta = 0, int borderType = BORDER_DEFAULT
-//      opencv_imgproc.Sobel(/* src = */ matIn, /* dst = */ sobel, /* ddepth = */ opencv_core.CV_32F,
-//        /* dx = */ 1, /* dy = */ 1, /* ksize = */ 3, /* scale = */ 1.0,
-//        /* delta = */ 0.0, /* borderType = */ opencv_core.BORDER_DEFAULT)
-//      opencv_imgproc.GaussianBlur(???, ???, ???, ???)
-//      opencv_imgproc.cvtColor(matIn, gray, opencv_imgproc.COLOR_BGR2GRAY)
-//      opencv_imgproc.Canny(gray, canny, 40.0 /* 80.0 */ /* 40.0 */, 200.0, 3, false)
-//      // XXX TODO --- hough only accepts gray -- binary output of canny fails
-
-      opencv_imgproc.medianBlur(matIn, matIn, 3)
-      opencv_imgproc.Laplacian(matIn, edge, opencv_core.CV_32F, 5 /* 3 */, 1.0, 0.0, opencv_core.BORDER_REPLICATE)
-      opencv_imgproc.GaussianBlur(edge, blur, new Size(5, 5), 1.0)
-      //  opencv_core.normalize(blur, blur)
-      opencv_imgproc.cvtColor(blur, gray, opencv_imgproc.COLOR_BGR2GRAY)
-      //  opencv_imgproc.Canny(canny, canny, 80.0 /* 40.0 */, 200.0, 3, false)
-      //  opencv_imgproc.equalizeHist(gray, gray)
-
-      //  val minPtr = new DoublePointer(1)
-      //  val maxPtr = new DoublePointer(1)
-      //  opencv_core.minMaxLoc(gray, minPtr, maxPtr, null, null, null)
-      //  println(s"min = ${minPtr.get()}; max = ${maxPtr.get()}")
-
-      val indexer = gray.createIndexer[FloatRawIndexer]()
-      //  println(s"sizes = ${indexer.sizes().mkString("[", ", ", "]")}")
-      // var min     = Float.MaxValue
-      // var max     = Float.MinValue
-      val thresh  = 127f
-      var y       = 0
-      val width   = frame.imageWidth
-      val height  = frame.imageHeight
-      while (y < height) {
-        var x = 0
-        while (x < width) {
-          val v = indexer.get(y, x, 0)
-          // if (v < min) min = v
-          // if (v > max) max = v
-          val b = if (v > thresh) 255f else 0f
-          indexer.put(y, x, b)
-          x += 1
-        }
-        y += 1
-      }
-
-//      println(s"TYPE = ${gray.`type`()}")
-      val gray8 = new Mat
-      gray.convertTo(gray8, opencv_core.CV_8U)
-      val res = Analyze.run(gray8 /* canny */, anaCfg)
-
-//      var minX, minY, maxX, maxY = 0
-//      res.foreach { ln =>
-//        val x1 = ln.pt1.x
-//        val y1 = ln.pt1.y
-//        val x2 = ln.pt2.x
-//        val y2 = ln.pt2.y
-//        if (x1 < minX) minX = x1
-//        if (x1 > maxX) maxX = x1
-//        if (y1 < minX) minX = y1
-//        if (y1 > maxX) maxX = y1
-//        if (x2 < minY) minY = x2
-//        if (x2 > maxY) maxY = x2
-//        if (y2 < minY) minY = y2
-//        if (y2 > maxY) maxY = y2
-//      }
-//      log.debug(s"analysis yielded ${res.size} lines ($minX, $minY, $maxX, $maxY)")
-
+      val res = analyze(frame)
       sender() ! Test.Analysis(res)
 
     case Open(width, height) =>
@@ -129,6 +142,43 @@ final class Source extends Actor {
     case Close =>
       log.info("closing")
       grabber.stop()
+
+    case x =>
+      log.warning(s"received unknown message '$x'")
+  }
+}
+final class SourceFiles extends SourceLike with Actor {
+  import Source._
+
+  private[this] val log     = Logging(context.system, this)
+  private[this] var imageIdx      = 0
+  private[this] val imageIndices  = Array[Int](7763, 7773, 7775, 7777, 7782, 7784, 7787, 7789, 7798, 7854, 7864)
+  private[this] val dirIn         = userHome / "Documents" / "projects" / "Imperfect" / "esc_photos"
+
+  def receive: Receive = {
+    case Task =>
+      val fIn     = dirIn / s"IMG_${imageIndices(imageIdx)}.jpg"
+      imageIdx    = (imageIdx + 1) % imageIndices.length
+      val matIn   = opencv_imgcodecs.imread(fIn.path)
+      val imgIn   = toMat.convert(matIn)
+      val scaled  = new Mat
+      val width   = 1920
+      val height  = 1280 // 1080
+      val scx     = width .toDouble / imgIn.imageWidth
+      val scy     = height.toDouble / imgIn.imageHeight
+      val scale   = math.max(scx, scy)
+
+      opencv_imgproc.resize(/* src = */ matIn, /* dst = */ scaled, /* size = */ new opencv_core.Size(width, height),
+        /* fx = */ scale, /* fy = 0.0 */ scale, /* interp = */ opencv_imgproc.INTER_LANCZOS4)
+      val frame = toMat.convert(scaled)
+      val res = analyze(frame)
+      sender() ! Test.Analysis(res)
+
+    case Open(width, height) =>
+      log.info("opening")
+
+    case Close =>
+      log.info("closing")
 
     case x =>
       log.warning(s"received unknown message '$x'")
