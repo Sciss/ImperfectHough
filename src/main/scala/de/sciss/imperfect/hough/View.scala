@@ -12,7 +12,7 @@ import scala.collection.immutable.{IndexedSeq => Vec}
 
 object View {
   final case class Config(verbose: Boolean = false, screenId: String = "", listScreens: Boolean = false,
-                          useGrabber: Boolean = false)
+                          useGrabber: Boolean = false, antiAliasing: Boolean = true)
 
   def main(args: Array[String]): Unit = {
     val p = new scopt.OptionParser[Config]("Imperfect-RaspiPlayer") {
@@ -40,6 +40,10 @@ object View {
       opt[Unit] ('g', "grabber")
         .text ("Use video grabber instead of reading files")
         .action   { (v, c) => c.copy(useGrabber = true) }
+
+      opt[Unit] ("no-aa")
+        .text ("Disable anti-aliasing")
+        .action   { (v, c) => c.copy(antiAliasing = false) }
     }
     p.parse(args, Config()).fold(sys.exit(1)) { config =>
       if (config.listScreens) {
@@ -48,7 +52,9 @@ object View {
       }
 
       Test.main(config)
-      EventQueue.invokeLater(new Runnable { def run(): Unit = View.run(config) })
+      EventQueue.invokeLater(new Runnable {
+        def run(): Unit = View.run(config)
+      })
     }
   }
 
@@ -59,6 +65,7 @@ object View {
   }
 
   def run(config: Config): Unit = {
+    this.antiAliasing = config.antiAliasing
     import config._
     val screens = GraphicsEnvironment.getLocalGraphicsEnvironment.getScreenDevices
     val opt1: Option[GraphicsDevice] = if (screenId.isEmpty) None else {
@@ -161,11 +168,12 @@ object View {
     t.start()
   }
 
-  private[this] val fntTest   = new Font(Font.SANS_SERIF, Font.BOLD, 500)
-  private[this] var drawRect  = false
-  private[this] var drawText  = false
-  private[this] var animate   = true
-  private[this] var frameIdx  = 0
+  private[this] val fntTest       = new Font(Font.SANS_SERIF, Font.BOLD, 500)
+  private[this] var drawRect      = false
+  private[this] var drawText      = false
+  private[this] var animate       = true
+  private[this] var frameIdx      = 0
+  private[this] var antiAliasing  = true
 
   @volatile
   var lines = Vec.empty[Line]
@@ -187,16 +195,25 @@ object View {
     }
 
     {
-      val atOrig = g.getTransform
-      g.scale(1.0, 540.0 / 1280)
-      g.translate((frameIdx * 4) % 1920, 0)
+//      val atOrig = g.getTransform
+      val sx = 1.0
+      val sy = 540.0 / 1280
+      val tx = (frameIdx * 4) % 1920
+      val ty = 0
+//      g.scale(1.0, 540.0 / 1280)
+//      g.translate((frameIdx * 4) % 1920, 0)
       g.setColor(Color.white)
       g.setStroke(new BasicStroke(2f))
-      g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+      if (antiAliasing) g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
       lines.foreach { case Line(pt1, pt2) =>
-        g.drawLine(pt1.x, pt1.y, pt2.x, pt2.y)
+        val x1 = (pt1.x * sx + tx).toInt
+        val y1 = (pt1.y * sy + ty).toInt
+        val x2 = (pt2.x * sx + tx).toInt
+        val y2 = (pt2.y * sy + ty).toInt
+//        g.drawLine(pt1.x, pt1.y, pt2.x, pt2.y)
+        g.drawLine(x1, y1, x2, y2)
       }
-      g.setTransform(atOrig)
+//      g.setTransform(atOrig)
     }
 
     if (drawRect) {
