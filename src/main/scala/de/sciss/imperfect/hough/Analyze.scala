@@ -218,9 +218,9 @@ object Analyze {
       lines0
     }
 
-    val t1 = System.currentTimeMillis()
+//    val t1 = System.currentTimeMillis()
     val lines0 = if (useProb) houghP() else hough()
-    val t2 = System.currentTimeMillis()
+//    val t2 = System.currentTimeMillis()
 //    println(s"Analysis took ${t2-t1}ms.")
 
 //    println(s"[0] ${lines0.size}")
@@ -287,7 +287,7 @@ object Analyze {
                 val p3 = sect3.get
 
                 def rangeCheck(pt: Point): Boolean = {
-                  val bad = (pt.x < 0 || pt.x > width || pt.y < 0 || pt.y > height)
+                  val bad = pt.x < 0 || pt.x > width || pt.y < 0 || pt.y > height
                   if (bad) println(s"out-of-bounds: (${pt.x}, ${pt.y})")
                   bad
                 }
