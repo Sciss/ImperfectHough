@@ -1,3 +1,16 @@
+/*
+ *  MainLoop.scala
+ *  (Imperfect Reconstruction)
+ *
+ *  Copyright (c) 2016 Hanns Holger Rutz. All rights reserved.
+ *
+ *  This software is published under the GNU General Public License v2+
+ *
+ *
+ *  For further information, please contact Hanns Holger Rutz at
+ *  contact@sciss.de
+ */
+
 package de.sciss.imperfect.hough
 
 import akka.actor.{Actor, ActorRef, ActorSystem, Props}
@@ -5,10 +18,14 @@ import de.sciss.imperfect.hough.Analyze.Line
 
 import scala.collection.immutable.{IndexedSeq => Vec}
 
-object Test {
+object MainLoop {
   def main(config: View.Config): Unit = {
     val system  = ActorSystem("system")
-    val sourceP = if (config.useGrabber) Source.live() else Source.files()
+    val sourceP = if (config.useGrabber) Source.live()
+             else if (config.useIPCam  ) Source.ipCam(ip = config.cameraIP, password = config.cameraPassword,
+                                                      hAngleStep = config.camHAngleStep, vAngle = config.camVAngle)
+             else                        Source.files()
+
     val source  = system.actorOf(sourceP, "source")
     val testP   = props(source)
     val test    = system.actorOf(testP, "test")
@@ -19,10 +36,10 @@ object Test {
   case object Stop
   case class Analysis(lines: Vec[Line])
 
-  def props(source: ActorRef): Props = Props(new Test(source))
+  def props(source: ActorRef): Props = Props(new MainLoop(source))
 }
-class Test(source: ActorRef) extends Actor {
-  import Test._
+class MainLoop(source: ActorRef) extends Actor {
+  import MainLoop._
 
   def receive: Receive = {
     case Start =>

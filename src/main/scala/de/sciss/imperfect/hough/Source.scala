@@ -31,6 +31,8 @@ object Source {
 
   def live (): Props = Props(new SourceLive)
   def files(): Props = Props(new SourceFiles)
+  def ipCam(ip: String, password: String, hAngleStep: Double, vAngle: Double): Props =
+    Props(new SourceIPCam(ip = ip, password = password, hAngleStep = hAngleStep, vAngle = vAngle))
 }
 abstract class SourceLike {
   _: Actor =>
@@ -124,7 +126,7 @@ final class SourceLive extends SourceLike with Actor {
       // grabber.trigger()
       val frame = grabber.grab()
       val res = analyze(frame)
-      sender() ! Test.Analysis(res)
+      sender() ! MainLoop.Analysis(res)
 
     case Open(width, height) =>
       log.info("opening")
@@ -154,6 +156,8 @@ final class SourceFiles extends SourceLike with Actor {
   private[this] var imageIdx      = 0
   private[this] val imageIndices  = Array[Int](7763, 7773, 7775, 7777, 7782, 7784, 7787, 7789, 7798, 7854, 7864)
   private[this] val dirIn         = userHome / "Documents" / "projects" / "Imperfect" / "esc_photos"
+  private[this] var width     = -1
+  private[this] var height    = -1
 
   def receive: Receive = {
     case Task =>
@@ -162,8 +166,6 @@ final class SourceFiles extends SourceLike with Actor {
       val matIn   = opencv_imgcodecs.imread(fIn.path)
       val imgIn   = toMat.convert(matIn)
       val scaled  = new Mat
-      val width   = 1920
-      val height  = 1280 // 1080
       val scx     = width .toDouble / imgIn.imageWidth
       val scy     = height.toDouble / imgIn.imageHeight
       val scale   = math.max(scx, scy)
@@ -172,10 +174,12 @@ final class SourceFiles extends SourceLike with Actor {
         /* fx = */ scale, /* fy = 0.0 */ scale, /* interp = */ opencv_imgproc.INTER_LANCZOS4)
       val frame = toMat.convert(scaled)
       val res = analyze(frame)
-      sender() ! Test.Analysis(res)
+      sender() ! MainLoop.Analysis(res)
 
-    case Open(width, height) =>
+    case Open(_width, _height) =>
       log.info("opening")
+      width   = _width
+      height  = _height
 
     case Close =>
       log.info("closing")

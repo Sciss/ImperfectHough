@@ -1,3 +1,16 @@
+/*
+ *  View.scala
+ *  (Imperfect Reconstruction)
+ *
+ *  Copyright (c) 2016 Hanns Holger Rutz. All rights reserved.
+ *
+ *  This software is published under the GNU General Public License v2+
+ *
+ *
+ *  For further information, please contact Hanns Holger Rutz at
+ *  contact@sciss.de
+ */
+
 package de.sciss.imperfect.hough
 
 import java.awt.event.{ActionEvent, ActionListener, KeyAdapter, KeyEvent, MouseAdapter, MouseEvent}
@@ -12,7 +25,9 @@ import scala.collection.immutable.{IndexedSeq => Vec}
 
 object View {
   final case class Config(verbose: Boolean = false, screenId: String = "", listScreens: Boolean = false,
-                          useGrabber: Boolean = false, antiAliasing: Boolean = true)
+                          useGrabber: Boolean = false, antiAliasing: Boolean = true,
+                          cameraIP: String = "192.168.0.41", cameraPassword: String = "???",
+                          useIPCam: Boolean = false, camHAngleStep: Double = 4.0, camVAngle: Double = 0.0)
 
   def main(args: Array[String]): Unit = {
     val p = new scopt.OptionParser[Config]("Imperfect-RaspiPlayer") {
@@ -44,6 +59,22 @@ object View {
       opt[Unit] ("no-aa")
         .text ("Disable anti-aliasing")
         .action   { (v, c) => c.copy(antiAliasing = false) }
+
+      opt[String] ("camera-ip")
+        .text ("IP address of the Amcrest IP camera")
+        .action   { (v, c) => c.copy(cameraIP = v, useIPCam = true) }
+
+      opt[String] ("camera-password")
+        .text ("Password of the Amcrest IP camera (no default - must be provided if not using grabber)")
+        .action   { (v, c) => c.copy(cameraPassword = v, useIPCam = true) }
+
+      opt[Double] ("h-angle-step")
+        .text ("Camera PTZ horizontal angle step (degrees; default: 4.0)")
+        .action   { (v, c) => c.copy(camHAngleStep = v, useIPCam = true) }
+
+      opt[Double] ("v-angle")
+        .text ("Camera PTZ vertical angle (degrees; default: 0.0)")
+        .action   { (v, c) => c.copy(camVAngle = v, useIPCam = true) }
     }
     p.parse(args, Config()).fold(sys.exit(1)) { config =>
       if (config.listScreens) {
@@ -51,7 +82,7 @@ object View {
         sys.exit()
       }
 
-      Test.main(config)
+      MainLoop.main(config)
       EventQueue.invokeLater(new Runnable {
         def run(): Unit = View.run(config)
       })
