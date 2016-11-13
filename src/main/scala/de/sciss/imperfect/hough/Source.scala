@@ -17,7 +17,6 @@ import java.awt.image.BufferedImage
 
 import akka.actor.{Actor, ActorRef, Props}
 import akka.event.Logging
-import de.sciss.kollflitz.Vec
 import org.bytedeco.javacpp.indexer.UByteRawIndexer
 import org.bytedeco.javacpp.opencv_core.{Mat, Size}
 import org.bytedeco.javacpp.{opencv_core, opencv_imgproc}
@@ -106,6 +105,7 @@ abstract class SourceLike extends Actor {
   private[this] val maxLines  = 2560
   private[this] val lines     = Array.fill(maxLines)(new Line(0, 0, 0, 0))
   private[this] val hough     = new Hough(lines)
+  private[this] val analysis  = new Analyze(maxLines)
 
   protected final val log     = Logging(context.system, this)
 
@@ -128,7 +128,7 @@ abstract class SourceLike extends Actor {
     }
   }
 
-  final def analyze(frame: Frame): Vec[Line] = {
+  final def analyze(frame: Frame): Array[LineI] = {
     val _gray     = convertToGray(frame)
     val bw        = convertToBlackAndWhite(_gray, bwThresh)
     val numLines  = mkHough(_gray)
@@ -139,9 +139,9 @@ abstract class SourceLike extends Actor {
       actor ! ThreshImage(bufImg)
     }
 
-    val width   = bw.cols()
-    val height  = bw.rows()
-    val res     = Analyze.run(lines, numLines0 = numLines, width = width, height = height, config = anaCfg)
+    val width    = bw.cols()
+    val height   = bw.rows()
+    val numTriLn = analysis.run(lines, numLines0 = numLines, width = width, height = height, config = anaCfg)
 
     //      var minX, minY, maxX, maxY = 0
     //      res.foreach { ln =>
@@ -159,6 +159,13 @@ abstract class SourceLike extends Actor {
     //        if (y2 > maxY) maxY = y2
     //      }
     //      log.debug(s"analysis yielded ${res.size} lines ($minX, $minY, $maxX, $maxY)")
+
+    val res = new Array[LineI](numTriLn)
+    var i = 0
+    while (i < numTriLn) {
+      res(i) = lines(i).immutable
+      i += 1
+    }
 
     res
   }

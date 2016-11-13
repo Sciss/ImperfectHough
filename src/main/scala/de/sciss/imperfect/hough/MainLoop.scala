@@ -15,8 +15,6 @@ package de.sciss.imperfect.hough
 
 import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 
-import scala.collection.immutable.{IndexedSeq => Vec}
-
 object MainLoop {
   def run(system: ActorSystem, config: View.Config): ActorRef = {
     val sourceP = if (config.useGrabber) Source.live()
@@ -33,7 +31,7 @@ object MainLoop {
 
   case object Start
   case object Stop
-  case class Analysis(lines: Vec[Line])
+  case class Analysis(lines: Array[LineI])
 
   def props(source: ActorRef): Props = Props(new MainLoop(source))
 }

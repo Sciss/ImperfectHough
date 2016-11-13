@@ -16,6 +16,7 @@ package de.sciss.imperfect.hough
 import java.io.ByteArrayOutputStream
 
 import akka.actor.Actor
+import de.sciss.numbers
 import org.bytedeco.javacpp.indexer.UByteRawIndexer
 import org.bytedeco.javacpp.opencv_core.Mat
 import org.bytedeco.javacpp.{opencv_core, opencv_imgcodecs, opencv_imgproc}
@@ -55,9 +56,10 @@ final class SourceIPCam(ip: String, password: String, hAngleStep: Double, vAngle
     val resPTZ = Process(cmdPTZ()).#>(osCapture).!
     require(resPTZ == 0, s"'wget' for pan/tilt/zoom exited with error code $resPTZ")
     if (inc) hAngle += hAngleStep * hAngleDir
-    if (hAngle < 0 || hAngle > 360) {
-      hAngle    = -hAngle
+    if (hAngle < 0 || hAngle > 359) {
+      import numbers.Implicits._
       hAngleDir = -hAngleDir
+      hAngle    = hAngle.fold(0, 359)
     }
   }
 

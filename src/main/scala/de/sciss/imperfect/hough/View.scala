@@ -21,8 +21,6 @@ import javax.swing.Timer
 
 import akka.actor.{ActorRef, ActorSystem}
 
-import scala.collection.immutable.{IndexedSeq => Vec}
-
 object View {
   final case class Config(verbose: Boolean = false, screenId: String = "", ctlScreenId: String = "",
                           listScreens: Boolean = false,
@@ -220,7 +218,7 @@ object View {
   private[this] var antiAliasing  = true
 
   @volatile
-  var lines = Vec.empty[Line]
+  var lines = Array.empty[LineI]
 
   def paintOffScreen(): Unit = {
     val g = OffScreenG
@@ -241,7 +239,7 @@ object View {
     {
 //      val atOrig = g.getTransform
 //      val sx = 1.0
-      val sx = 540.0 / 1280
+      val sx = 540.0 / 1280 * (16.0/9) / (4.0/3)
       val sy = 540.0 / 1280
       val tx = (frameIdx * 4) % 1920
       val ty = 0
