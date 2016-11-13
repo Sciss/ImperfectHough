@@ -16,7 +16,6 @@ package de.sciss.imperfect.hough
 import java.io.ByteArrayOutputStream
 
 import akka.actor.Actor
-import akka.event.Logging
 import org.bytedeco.javacpp.indexer.UByteRawIndexer
 import org.bytedeco.javacpp.opencv_core.Mat
 import org.bytedeco.javacpp.{opencv_core, opencv_imgcodecs, opencv_imgproc}
@@ -28,8 +27,6 @@ final class SourceIPCam(ip: String, password: String, hAngleStep: Double, vAngle
   extends SourceLike with Actor {
 
   import Source._
-
-  private[this] val log = Logging(context.system, this)
 
   private[this] val cmdCapture = Seq("wget", s"http://$ip/cgi-bin/snapshot.cgi",
     "--user", "admin", "--password", password, "-O-", "-q")
@@ -112,6 +109,9 @@ final class SourceIPCam(ip: String, password: String, hAngleStep: Double, vAngle
 
     case Close =>
       log.info("closing")
+
+    case Control(flags) =>
+      setControl(if (flags == 0) None else Some(sender()), flags = flags)
 
     case x =>
       log.warning(s"received unknown message '$x'")

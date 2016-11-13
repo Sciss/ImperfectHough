@@ -19,12 +19,13 @@ import java.awt.{BasicStroke, Color, EventQueue, Font, Frame, GraphicsDevice, Gr
 import java.io.PrintStream
 import javax.swing.Timer
 
-import de.sciss.imperfect.hough.Analyze.Line
+import akka.actor.{ActorRef, ActorSystem}
 
 import scala.collection.immutable.{IndexedSeq => Vec}
 
 object View {
-  final case class Config(verbose: Boolean = false, screenId: String = "", listScreens: Boolean = false,
+  final case class Config(verbose: Boolean = false, screenId: String = "", ctlScreenId: String = "",
+                          listScreens: Boolean = false,
                           useGrabber: Boolean = false, antiAliasing: Boolean = true,
                           cameraIP: String = "192.168.0.41", cameraPassword: String = "???",
                           useIPCam: Boolean = false, camHAngleStep: Double = 4.0, camVAngle: Double = 0.0)
@@ -44,6 +45,10 @@ object View {
       opt[String] ('s', "screen")
         .text ("Screen identifier")
         .action   { (v, c) => c.copy(screenId = v) }
+
+      opt[String] ('c', "control-screen")
+        .text ("Screen identifier for control window")
+        .action   { (v, c) => c.copy(ctlScreenId = v) }
 
       opt[Unit] ('l', "list-screens")
         .text ("List available screens")
@@ -82,20 +87,24 @@ object View {
         sys.exit()
       }
 
-      MainLoop.main(config)
+      val system      = ActorSystem("system")
+      val sourceActor = MainLoop.run(system, config)
       EventQueue.invokeLater(new Runnable {
-        def run(): Unit = View.run(config)
+        def run(): Unit = View.run(system, config, sourceActor)
       })
     }
   }
 
   private[this] def printScreens(out: PrintStream): Unit = {
     val screens = GraphicsEnvironment.getLocalGraphicsEnvironment.getScreenDevices
-    val s = screens.map(_.getIDstring).sorted.mkString("  ", "\n  ", "")
+    val s = screens.map { dev =>
+      val m = dev.getDisplayMode
+      s"'${dev.getIDstring}' - ${m.getWidth} x ${m.getHeight}"
+    } .sorted.mkString("  ", "\n  ", "")
     out.println(s)
   }
 
-  def run(config: Config): Unit = {
+  def run(system: ActorSystem, config: Config, sourceActor: ActorRef): Unit = {
     this.antiAliasing = config.antiAliasing
     import config._
     val screens = GraphicsEnvironment.getLocalGraphicsEnvironment.getScreenDevices
@@ -118,6 +127,8 @@ object View {
       opt2.getOrElse(screens.head)
     }
 
+    lazy val controlWindow = new ControlWindow(system, config, sourceActor)
+
     var haveWarnedWinSize = false
 
     val screenConf = screen.getDefaultConfiguration
@@ -133,6 +144,8 @@ object View {
           case KeyEvent.VK_R      => drawRect = !drawRect // ; w.repaint()
           case KeyEvent.VK_T      => drawText = !drawText
           case KeyEvent.VK_A      => animate  = !animate
+          case KeyEvent.VK_C      => controlWindow.open()
+
           case _ =>
         }
       }
@@ -227,7 +240,8 @@ object View {
 
     {
 //      val atOrig = g.getTransform
-      val sx = 1.0
+//      val sx = 1.0
+      val sx = 540.0 / 1280
       val sy = 540.0 / 1280
       val tx = (frameIdx * 4) % 1920
       val ty = 0
@@ -236,11 +250,11 @@ object View {
       g.setColor(Color.white)
       g.setStroke(new BasicStroke(2f))
       if (antiAliasing) g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-      lines.foreach { case Line(pt1, pt2) =>
-        val x1 = (pt1.x * sx + tx).toInt
-        val y1 = (pt1.y * sy + ty).toInt
-        val x2 = (pt2.x * sx + tx).toInt
-        val y2 = (pt2.y * sy + ty).toInt
+      lines.foreach { ln =>
+        val x1 = (ln.x1 * sx + tx).toInt
+        val y1 = (ln.y1 * sy + ty).toInt
+        val x2 = (ln.x2 * sx + tx).toInt
+        val y2 = (ln.y2 * sy + ty).toInt
 //        g.drawLine(pt1.x, pt1.y, pt2.x, pt2.y)
         g.drawLine(x1, y1, x2, y2)
       }

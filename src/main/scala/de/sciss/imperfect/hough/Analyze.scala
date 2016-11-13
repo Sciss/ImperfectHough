@@ -13,9 +13,9 @@
 
 package de.sciss.imperfect.hough
 
-import org.bytedeco.javacpp.indexer.{FloatRawIndexer, IntRawIndexer}
-import org.bytedeco.javacpp.opencv_core.{Mat, Point}
-import org.bytedeco.javacpp.opencv_imgproc
+import java.util
+
+import org.bytedeco.javacpp.opencv_core.Point
 
 import scala.collection.immutable.{IndexedSeq => Vec}
 
@@ -24,105 +24,94 @@ object Analyze {
                     maxLineGap: Int = 20, minAngDeg: Double = 11.25 /* 22.5 */, useTri: Boolean = true,
                     useExtend: Boolean = true)
 
-  case class Line(pt1: Point, pt2: Point) {
-    override def toString = s"Line(${pt1.x}, ${pt1.y}, ${pt2.x}, ${pt2.y})"
+  def extendLine(ln: Line, width: Int, height: Int): Unit = {
+    val dy = ln.y2 - ln.y1
+    val dx = ln.x2 - ln.x1
+    if (dx == 0) {
+      ln.y1 = 0
+      ln.y2 = height - 1
+    } else if (dy == 0) {
+      ln.x1 = 0
+      ln.x2 = width - 1
+    } else {
+      // f(x) = ax + b
+      val a   = dy.toDouble / dx
+      val b   = ln.y1 - a * ln.x1
+      var x0, x1, y0, y1 = 0.0
 
-    def intersects(that: Line): Boolean = {
-      val opt = intersectLineLine(
-        this.pt1.x, this.pt1.y, this.pt2.x, this.pt2.y,
-        that.pt1.x, that.pt1.y, that.pt2.x, that.pt2.y)
-      opt.isDefined
-    }
+      if (b < 0) {
+        y0 = 0.0
+        x0 = (y0 - b) / a
+        //          y1 = height - 1
+        //          x1 = (y1 - b) / a
 
-    def intersection(that: Line): Option[Point] = {
-      val opt = intersectLineLine(
-        this.pt1.x, this.pt1.y, this.pt2.x, this.pt2.y,
-        that.pt1.x, that.pt1.y, that.pt2.x, that.pt2.y)
-      opt.map { case (xd, yd) =>
-        new Point(math.round(xd).toInt, math.round(yd).toInt)
-      }
-    }
+      } else if (b >= height) {
+        y0 = height - 1
+        x0 = (y0 - b) / a
+        //          y1 = 0.0
+        //          x1 = (y1 - b) / a
 
-    def extend(width: Int, height: Int): Line = {
-      val dy = pt2.y - pt1.y
-      val dx = pt2.x - pt1.x
-      if (dx == 0) {
-        Line(new Point(pt1.x, 0), new Point(pt1.x, height - 1))
-      } else if (dy == 0) {
-        Line(new Point(0, pt1.y), new Point(width - 1, pt1.y))
       } else {
-        // f(x) = ax + b
-        val a   = dy.toDouble / dx
-        val b   = pt1.y - a * pt1.x
-        var x0, x1, y0, y1 = 0.0
-
-        if (b < 0) {
-          y0 = 0.0
-          x0 = (y0 - b) / a
-          //          y1 = height - 1
-          //          x1 = (y1 - b) / a
-
-        } else if (b >= height) {
-          y0 = height - 1
-          x0 = (y0 - b) / a
-          //          y1 = 0.0
-          //          x1 = (y1 - b) / a
-
-        } else {
-          x0 = 0.0
-          y0 = b
-        }
-        y1 = ((width - 1) - pt1.x) * a + pt1.y
-        if (y1 < 0) {
-          y1 = 0.0
-          x1 = (y1 - b) / a
-        } else if (y1 >= height) {
-          y1 = height - 1
-          x1 = (y1 - b) / a
-        } else {
-          x1 = width - 1
-        }
-
-        //        val x0i = (x0 + 0.5).toInt
-        //        val y0i = (y0 + 0.5).toInt
-        //        val x1i = (x1 + 0.5).toInt
-        //        val y1i = (y1 + 0.5).toInt
-
-        val x0i = ((pt1.x + x0) * 0.5 + 0.5).toInt
-        val y0i = ((pt1.y + y0) * 0.5 + 0.5).toInt
-        val x1i = ((pt2.x + x1) * 0.5 + 0.5).toInt
-        val y1i = ((pt2.y + y1) * 0.5 + 0.5).toInt
-
-        Line(new Point(x0i, y0i), new Point(x1i,y1i))
+        x0 = 0.0
+        y0 = b
       }
-    }
+      y1 = ((width - 1) - ln.x1) * a + ln.y1
+      if (y1 < 0) {
+        y1 = 0.0
+        x1 = (y1 - b) / a
+      } else if (y1 >= height) {
+        y1 = height - 1
+        x1 = (y1 - b) / a
+      } else {
+        x1 = width - 1
+      }
 
-    //    def intersection(that: Line, width: Int, height: Int): Option[Point] = {
-    //      val thisExt = this.extend(width, height)
-    //      val thatExt = that.extend(width, height)
-    //
-    //      val opt = intersectLineLine(
-    //        thisExt.pt1.x, thisExt.pt1.y, thisExt.pt2.x, thisExt.pt2.y,
-    //        thatExt.pt1.x, thatExt.pt1.y, thatExt.pt2.x, thatExt.pt2.y)
-    //      opt.map { case (xd, yd) =>
-    //        new Point(math.round(xd).toInt, math.round(yd).toInt)
-    //      }
-    //    }
+      //        val x0i = (x0 + 0.5).toInt
+      //        val y0i = (y0 + 0.5).toInt
+      //        val x1i = (x1 + 0.5).toInt
+      //        val y1i = (y1 + 0.5).toInt
+
+      val x0i = ((ln.x1 + x0) * 0.5 + 0.5).toInt
+      val y0i = ((ln.y1 + y0) * 0.5 + 0.5).toInt
+      val x1i = ((ln.x2 + x1) * 0.5 + 0.5).toInt
+      val y1i = ((ln.y2 + y1) * 0.5 + 0.5).toInt
+
+      ln.x1 = x0i
+      ln.y1 = y0i
+      ln.x2 = x1i
+      ln.y2 = y1i
+    }
+  }
+
+  def lineIntersects(a: Line, b: Line): Boolean = {
+    val opt = intersectLineLine(
+      a.x1, a.y1, a.x2, a.y2,
+      b.x1, b.y1, b.x2, b.y2)
+    opt.isDefined
+  }
+
+  def lineIntersection(a: Line, b: Line): Option[Point] = {
+    val opt = intersectLineLine(
+      a.x1, a.y1, a.x2, a.y2,
+      b.x1, b.y1, b.x2, b.y2)
+    opt.map { case (xd, yd) =>
+      new Point(math.round(xd).toInt, math.round(yd).toInt)
+    }
   }
 
   def angleBetween(ln1: Line, ln2: Line): Double = {
-    val dx1 = (ln1.pt2.x - ln1.pt1.x).toDouble
-    val dy1 = (ln1.pt2.y - ln1.pt1.y).toDouble
-    val dx2 = (ln2.pt2.x - ln2.pt1.x).toDouble
-    val dy2 = (ln2.pt2.y - ln2.pt1.y).toDouble
+    val dx1 = (ln1.x2 - ln1.x1).toDouble
+    val dy1 = (ln1.y2 - ln1.y1).toDouble
+    val dx2 = (ln2.x2 - ln2.x1).toDouble
+    val dy2 = (ln2.y2 - ln2.y1).toDouble
     val d   =  dx1*dx2 + dy1*dy2   // dot product of the 2 vectors
     val l2  = (dx1*dx1 + dy1*dy1) * (dx2*dx2 + dy2*dy2) // product of the squared lengths
     math.acos(d / math.sqrt(l2))
   }
 
   def lineLen(ln: Line): Double = {
-    val dx = ln.pt2.x - ln.pt1.x
-    val dy = ln.pt2.y - ln.pt1.y
+    val dx = ln.x2 - ln.x1
+    val dy = ln.y2 - ln.y1
     math.sqrt(dx * dx + dy * dy)
   }
 
@@ -149,115 +138,74 @@ object Analyze {
     }
   }
 
-  def run(matIn: Mat, config: Config): Vec[Line] = {
-    import config._
-    val mat         = matIn
-    val greyMat     = matIn // new Mat()
-    val lines       = new Mat()
-//    opencv_imgproc.cvtColor(mat, greyMat, opencv_imgproc.CV_BGR2GRAY, 1)
-    val rho         = 1.0
-    val theta       = 1.0.toRadians
-    val thresh      = 50
-    //    val minLineLen  = 40
-    //    val maxLineGap  = 20 // 10
-
-    //    val colrRed     = new Scalar(0, 0, 255, 128)
-    //    val colrBlack   = new Scalar(0, 0, 0, 255)
-
-    def houghP(): Vec[Line] = {
-      opencv_imgproc.HoughLinesP(greyMat, lines, rho, theta, thresh, minLineLen, maxLineGap)
-
-      //      println(s"rows = ${lines.rows()}; cols = ${lines.cols()}")
-      val indexer: IntRawIndexer = try {
-        lines.createIndexer() //.asInstanceOf[UByteRawIndexer]
-      } catch {
-        case _: NullPointerException => return Vector.empty // WTF -- happens occasionally
-      }
-      //      println(s"sizes = ${indexer.sizes().mkString("[", ", ", "]")}")
-
-      val lines0 = for (i <- 0 until indexer.rows().toInt /* lines.rows() */ ) yield {
-        val x1 = indexer.get(i, 0, 0)
-        val y1 = indexer.get(i, 0, 1)
-        val x2 = indexer.get(i, 0, 2)
-        val y2 = indexer.get(i, 0, 3)
-
-        //        println(s"x1 = $x1, y1 = $y1, x2 = $x2, y2 = $y2")
-
-        val pt1 = new Point(x1, y1)
-        val pt2 = new Point(x2, y2)
-        Line(pt1, pt2)
-      }
-      lines0
+  private[this] object X1Comparator extends Ordering[Line] {
+    def compare(a: Line, b: Line): Int = {
+      val ax1 = a.x1
+      val bx1 = b.x1
+      if (ax1 < bx1) -1 else if (ax1 > bx1) 1 else 0
     }
+  }
 
-    def hough(): Vec[Line] = {
-      opencv_imgproc.HoughLines(greyMat, lines, rho, theta, thresh)
-
-      //      println(s"rows = ${lines.rows()}; cols = ${lines.cols()}")
-      val indexer: FloatRawIndexer = lines.createIndexer() //.asInstanceOf[UByteRawIndexer]
-      //      println(s"sizes = ${indexer.sizes().mkString("[", ", ", "]")}")
-
-      val lines0 = for (i <- 0 until indexer.rows().toInt /* lines.rows() */) yield {
-        val rhoV    = indexer.get(i, 0, 0)
-        val thetaV  = indexer.get(i, 0, 1)
-        //        println(s"rho = $rhoV, theta = $thetaV")
-
-        val a   = math.cos(thetaV)
-        val b   = math.sin(thetaV)
-        val x0  = a * rhoV
-        val y0  = b * rhoV
-        val x1  = math.round(x0 + 100 * (-b)).toInt
-        val y1  = math.round(y0 + 100 * a).toInt
-        val x2  = math.round(x0 - 100 * (-b)).toInt
-        val y2  = math.round(y0 - 100 * a).toInt
-        val pt1 = new Point(x1, y1)
-        val pt2 = new Point(x2, y2)
-
-        Line(pt1, pt2)
-      }
-      lines0
-    }
-
-//    val t1 = System.currentTimeMillis()
-    val lines0 = if (useProb) houghP() else hough()
-//    val t2 = System.currentTimeMillis()
-//    println(s"Analysis took ${t2-t1}ms.")
-
-//    println(s"[0] ${lines0.size}")
-
-    val lines1 = if (!filterSim) lines0 else lines0.tails.flatMap {
-      case head +: tail =>
-        val isDup = tail.exists { that =>
-          val dx1 = head.pt1.x - that.pt1.x
-          val dy1 = head.pt1.y - that.pt1.y
-          val dx2 = head.pt2.x - that.pt2.x
-          val dy2 = head.pt2.y - that.pt2.y
+  def removeSimilarLines(lines: Array[Line], numIn: Int, dist: Int = 5): Int = {
+    util.Arrays.sort(lines, 0, numIn, X1Comparator)
+    val distSq  = dist * dist
+    var i       = 0
+    var numOut  = 0
+    while (i < numIn) {
+      val a   = lines(i)
+      var sim = false
+      var j   = i + 1
+      while (j < numIn) {
+        val b   = lines(j)
+        val dx1 = b.x1 - a.x1
+        if (dx1 >= dist) {  // we can short-cut now
+          j = numIn
+        } else {
+          val dy1     = b.y1 - a.y1
+          val dx2     = b.x2 - a.x2
+          val dy2     = b.y2 - a.y2
           val distSq1 = dx1 * dx1 + dy1 * dy1
           val distSq2 = dx2 * dx2 + dy2 * dy2
-          distSq1 < 20 && distSq2 < 20
+          sim         = distSq1 < distSq && distSq2 < distSq
+          if (sim) {
+            j = numIn
+          } else {
+            j += 1
+          }
         }
-        if (isDup) None else Some(head)
+      }
+      if (!sim) {
+        if (i != numOut) {
+          val b = lines(numOut)
+          b.x1 = a.x1
+          b.y1 = a.y1
+          b.x2 = a.x2
+          b.y2 = a.y2
+        }
+        numOut += 1
+      }
+      i += 1
+    }
+    numOut
+  }
 
-      case _ => None
-    }   .toVector
+  def run(lines: Array[Line], numLines0: Int, width: Int, height: Int, config: Config): Vec[Line] = {
+    import config._
 
-//    println(s"[1] ${lines1.size}")
+    val numLines = if (filterSim) removeSimilarLines(lines, numLines0) else numLines0
 
     val minAngRad = minAngDeg.toRadians
 
-    val width   = mat.cols
-    val height  = mat.rows
+    if (useExtend) {
+      var i = 0
+      while (i < numLines) {
+        extendLine(lines(i), width = width, height = height)
+        i += 1
+      }
+    }
 
-    val lines2 = if (useExtend) lines1.map { ln =>
-      val res = ln.extend(width, height)
-      // if (res.pt1.x > width || res.pt2.x > width || res.pt1.y > height || res.pt2.y > height) {
-      //  println(s"RANGE $ln -> $res")
-      // }
-      res
-    } else lines1
-
-    val lines3 = if (!useTri) lines2 else {
-      val lines1B = lines2 /*.filter(lineLen(_) >= minLen) */.toBuffer
+    if (useTri) {
+      val lines1B = lines.take(numLines) /*.filter(lineLen(_) >= minLen) */.toBuffer
       val lines2B = Vector.newBuilder[Line]
       var count1 = 0
       var count2 = 0
@@ -268,15 +216,15 @@ object Analyze {
         var i = 0
         while (i < lines1B.size) {
           val ln2 = lines1B(i)
-          val sect1 = ln1.intersection(ln2)
+          val sect1 = lineIntersection(ln1, ln2)
           if (sect1.isDefined && (minAngRad == 0 || angleBetween(ln1, ln2) >= minAngRad)) {
             count1 += 1
 //            if (count1 % 1000 == 0) println(s"count1 = $count1")
             var j = i + 1
             while (j < lines1B.size) {
               val ln3 = lines1B(j)
-              val sect2 = ln1.intersection(ln3)
-              val sect3 = if (sect2.isEmpty) None else ln2.intersection(ln3)
+              val sect2 = lineIntersection(ln1, ln3)
+              val sect3 = if (sect2.isEmpty) None else lineIntersection(ln2, ln3)
               if (sect2.isDefined && sect3.isDefined &&
                 (minAngRad == 0 || (angleBetween(ln1, ln3) >= minAngRad && angleBetween(ln2, ln3) >= minAngRad))) {
                 count2 += 1
@@ -292,9 +240,9 @@ object Analyze {
                   bad
                 }
 
-                val ln4 = Line(p1, p2)
-                val ln5 = Line(p2, p3)
-                val ln6 = Line(p3, p1)
+                val ln4 = new Line(p1.x, p1.y, p2.x, p2.y)
+                val ln5 = new Line(p2.x, p2.y, p3.x, p3.y)
+                val ln6 = new Line(p3.x, p3.y, p1.x, p1.y)
 
                 if (rangeCheck(p1) | rangeCheck(p2) | rangeCheck(p3)) {
                   println(s"ln1 = $ln1, ln2 = $ln2, ln3 = $ln3")
@@ -328,56 +276,8 @@ object Analyze {
 //      println(s"tri - $count1 / $count2 / $count3")
 
       lines2B.result()
+    } else {
+      lines.take(numLines).toVector
     }
-
-//    println(s"[2] ${lines3.size}")
-
-    //      val lines2 = testTriangle(lines1, 0, Vector.empty)
-    //      val lines2 = lines1
-
-    //      val numTri = lines1.tails.count {
-    //        case head +: tail => tail.count(head.intersects) > 2
-    //        case _ => false
-    //      }
-    //      println(s"numTri = $numTri")
-
-    //    val black = new Scalar(0, 0, 0, 0)
-    //    mat.setTo(black)
-
-    //    val rect    = new Rect(0, 0, width, height)
-//    println(s"w = $width, h = $height")
-
-    // bloody ting throws assertion error
-    //    opencv_imgproc.rectangle(mat, rect, colrBlack, 1, opencv_imgproc.CV_FILLED, 0)
-
-    // diese C scheisse ist wird mir jetzt echt zu bloed,
-    // muss man zwei jahre studieren, um rauszufinden,
-    // wie man die dusselige matrix auf null setzt
-
-//    val out = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
-//    val g = out.createGraphics()
-//    val t3 = System.currentTimeMillis()
-//    g.setColor(Color.black)
-//    g.fillRect(0, 0, width, height)
-//    g.setColor(Color.white)
-//    g.setStroke(new BasicStroke(2f))
-//    g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-//    lines3.foreach { case Line(pt1, pt2) =>
-//      g.drawLine(pt1.x, pt1.y, pt2.x, pt2.y)
-//    }
-//    g.dispose()
-//    val t4 = System.currentTimeMillis()
-////    println(s"Line drawing took ${t4-t3}ms")
-//    ImageIO.write(out, "jpeg", fOut)
-//    out.flush()
-
-    lines3
-
-    //    lines2.foreach { case Line(pt1, pt2) =>
-    //      opencv_imgproc.line(mat, pt1, pt2, colrRed, 1, opencv_core.LINE_AA, 0)
-    //    }
-    //
-    //    val pathOut = fOut.path
-    //    opencv_imgcodecs.imwrite(pathOut, mat)
   }
 }

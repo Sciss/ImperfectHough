@@ -14,22 +14,21 @@
 package de.sciss.imperfect.hough
 
 import akka.actor.{Actor, ActorRef, ActorSystem, Props}
-import de.sciss.imperfect.hough.Analyze.Line
 
 import scala.collection.immutable.{IndexedSeq => Vec}
 
 object MainLoop {
-  def main(config: View.Config): Unit = {
-    val system  = ActorSystem("system")
+  def run(system: ActorSystem, config: View.Config): ActorRef = {
     val sourceP = if (config.useGrabber) Source.live()
              else if (config.useIPCam  ) Source.ipCam(ip = config.cameraIP, password = config.cameraPassword,
                                                       hAngleStep = config.camHAngleStep, vAngle = config.camVAngle)
              else                        Source.files()
 
     val source  = system.actorOf(sourceP, "source")
-    val testP   = props(source)
-    val test    = system.actorOf(testP, "test")
-    test ! Start
+    val loopP   = props(source)
+    val loop    = system.actorOf(loopP, "test")
+    loop ! Start
+    source
   }
 
   case object Start
