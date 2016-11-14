@@ -42,7 +42,7 @@ final class SourceFiles extends SourceLike with Actor {
       opencv_imgproc.resize(/* src = */ matIn, /* dst = */ scaled, /* size = */ new opencv_core.Size(width, height),
         /* fx = */ scale, /* fy = 0.0 */ scale, /* interp = */ opencv_imgproc.INTER_LANCZOS4)
       val frame = toMat.convert(scaled)
-      val res = analyze(frame)
+      val res = analyze(frame, dir = 0)
       sender() ! MainLoop.Analysis(res)
 
     case Open(_width, _height) =>

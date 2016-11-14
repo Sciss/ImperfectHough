@@ -110,10 +110,15 @@ abstract class SourceLike extends Actor {
   private[this] val maxTriangles  = maxLines/2
   private[this] val lines1        = Array.fill (maxLines)(new Line(0, 0, 0, 0))
   //  private[this] val lines2    = Array.fill (maxLines)(new Line(0, 0, 0, 0))
-  private[this] val triangles1    = Array.fill (maxTriangles)(new Triangle(0, 0, 0, 0, 0, 0))
-  private[this] val triangles2    = Array.fill (maxTriangles)(new Triangle(0, 0, 0, 0, 0, 0))
   private[this] val hough         = new Hough  (maxLines)
   private[this] val analysis      = new Analyze(maxLines)
+
+  private[this] val triangles1    = Array.fill    (maxTriangles)(new Triangle(0, 0, 0, 0, 0, 0))
+  private[this] val triangles2    = Array.fill    (maxTriangles)(new Triangle(0, 0, 0, 0, 0, 0))
+  private[this] val triIndices1   = new Array[Int](maxTriangles)
+  private[this] val triIndices2   = new Array[Int](maxTriangles)
+  private[this] val coherence     = new Coherence (maxTriangles)
+  private[this] var numTriPrev    = 0
 
   protected final val log         = Logging(context.system, this)
 
@@ -138,11 +143,14 @@ abstract class SourceLike extends Actor {
 
   private[this] var flipFlop = false
 
-  final def analyze(frame: Frame): Array[TriangleI] = {
-    val _gray     = convertToGray(frame)
-    val bw        = convertToBlackAndWhite(_gray, bwThresh)
-    val lines     = lines1
-    val triangles = if (flipFlop) triangles2 else triangles1
+  final def analyze(frame: Frame, dir: Int): Array[TriangleI] = {
+    val _gray       = convertToGray(frame)
+    val bw          = convertToBlackAndWhite(_gray, bwThresh)
+    val lines       = lines1
+    val triPrev     = if (flipFlop) triangles1  else triangles2
+    val triNext     = if (flipFlop) triangles2  else triangles1
+    val triIdxPrev  = if (flipFlop) triIndices1 else triIndices2
+    val triIdxNext  = if (flipFlop) triIndices2 else triIndices1
 
     flipFlop      = !flipFlop
     var numLines  = mkHough(_gray, lines)
@@ -184,15 +192,26 @@ abstract class SourceLike extends Actor {
     }
 
     analysis.calcIntersections(lines, numLines = numLines, minAngDeg = anaCfg.minAngDeg)
-    val numTri = analysis.findTriangles(lines = lines, numLines = numLines, triangles = triangles,
+    val numTriNext = analysis.findTriangles(lines = lines, numLines = numLines, triangles = triNext,
       minTriLen = anaCfg.minTriLen, width = width, height = height)
 
-    val res = new Array[TriangleI](numTri)
+    val baseTol   = 40
+    val leftTol   = math.max(0, -dir) * baseTol + baseTol
+    val rightTol  = math.max(0,  dir) * baseTol + baseTol
+    val numMatch = coherence.run(triPrev = triPrev, numTriPrev = numTriPrev, triNext = triNext,
+      numTriNext = numTriNext, indicesPrev = triIdxPrev, indicesNext = triIdxNext,
+      leftTol = leftTol, rightTol = rightTol, topTol = baseTol, bottomTol = baseTol)
+
+    log.info(s"found $numMatch triangle matches (${numMatch * 100 / numTriNext}%)")
+
+    val res = new Array[TriangleI](numTriNext)
     var i = 0
-    while (i < numTri) {
-      res(i) = triangles(i).immutable
+    while (i < numTriNext) {
+      res(i) = triNext(i).immutable
       i += 1
     }
+
+    numTriPrev = numTriNext
 
     res
   }

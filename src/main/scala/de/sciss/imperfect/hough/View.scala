@@ -260,7 +260,6 @@ object View {
         val y2 = (tri.y2 * sy + ty).toInt
         val x3 = (tri.x3 * sx + tx).toInt
         val y3 = (tri.y3 * sy + ty).toInt
-//        g.drawLine(pt1.x, pt1.y, pt2.x, pt2.y)
         g.drawLine(x1, y1, x2, y2)
         g.drawLine(x2, y2, x3, y3)
         g.drawLine(x3, y3, x1, y1)

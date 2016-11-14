@@ -27,7 +27,7 @@ final class SourceLive extends SourceLike with Actor {
     case Task =>
       // grabber.trigger()
       val frame = grabber.grab()
-      val res = analyze(frame)
+      val res = analyze(frame, dir = 0)
       sender() ! MainLoop.Analysis(res)
 
     case Open(width, height) =>

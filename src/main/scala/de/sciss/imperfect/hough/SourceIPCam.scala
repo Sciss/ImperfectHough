@@ -99,8 +99,8 @@ final class SourceIPCam(ip: String, password: String, hAngleStep: Double, vAngle
           /* fx = */ scale, /* fy = 0.0 */ scale, /* interp = */ opencv_imgproc.INTER_LANCZOS4)
         toMat.convert(scaled)
       }
-      val res = analyze(imgSc)
-      log.info(s"analyzed ${res.size}")
+      val res = analyze(imgSc, dir = hAngleDir)
+      log.info(s"analyzed ${res.length}")
       sender() ! MainLoop.Analysis(res)
 
     case Open(_width, _height) =>
