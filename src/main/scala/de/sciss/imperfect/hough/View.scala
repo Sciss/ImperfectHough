@@ -23,6 +23,7 @@ import akka.actor.{ActorRef, ActorSystem}
 import de.sciss.imperfect.hough.MainLoop.Start
 import de.sciss.imperfect.hough.Source.Analysis
 import de.sciss.imperfect.hough.View.Config
+import de.sciss.numbers.IntFunctions
 
 import scala.swing.Swing
 
@@ -30,6 +31,7 @@ object View {
   final case class Config(verbose: Boolean = false, screenId: String = "", ctlScreenId: String = "",
                           listScreens: Boolean = false,
                           useGrabber: Boolean = false, antiAliasing: Boolean = true,
+                          breadCrumbs: Boolean = true,
                           cameraIP: String = "192.168.0.41", cameraPassword: String = "???",
                           useIPCam: Boolean = false, camHAngleStep: Double = 1.0, camVAngle: Double = 0.0)
 
@@ -67,6 +69,10 @@ object View {
       opt[Unit] ("no-aa")
         .text ("Disable anti-aliasing")
         .action   { (v, c) => c.copy(antiAliasing = false) }
+
+      opt[Unit] ("no-bread-crumbs")
+        .text ("Disable bread-crumb traces")
+        .action   { (v, c) => c.copy(breadCrumbs = false) }
 
       opt[String] ("camera-ip")
         .text ("IP address of the Amcrest IP camera")
@@ -114,6 +120,7 @@ object View {
 final class View(system: ActorSystem, config: Config, source: ActorRef, loop: ActorRef) {
   def run(): Unit = {
     this.antiAliasing = config.antiAliasing
+    this.breadCrumbs  = config.breadCrumbs
     import config._
     val screens = GraphicsEnvironment.getLocalGraphicsEnvironment.getScreenDevices
     val opt1: Option[GraphicsDevice] = if (screenId.isEmpty) None else {
@@ -230,6 +237,7 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
   private[this] var animate       = true
   private[this] var frameIdx      = 0
   private[this] var antiAliasing  = true
+  private[this] var breadCrumbs   = true
 
   private[this] val triNumFrames  = 40
 
@@ -267,8 +275,24 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
 
   def paintOffScreen(): Unit = {
     val g = OffScreenG
+    val sx = 540.0 / 1280 * (16.0/9) / (4.0/3)
+    val sy = 540.0 / 1280
+    //      val tx = (analysisFrames * 6) % 1920
+    //      val tx = (frameIdx % (1920 * 4)) * 0.25
+    //      val tx = frameIdx * 0.25
+    val tx = (frameIdx % (NominalWidth * 4)) * 0.25
+
     g.setColor(Color.black)
-    g.fillRect(0, 0, VisibleWidth, VisibleHeight)
+    if (breadCrumbs) {
+      val x1 = tx.toInt
+      val w1 = math.min(NominalWidth, VisibleWidth - x1)
+      g.fillRect(x1, 0, w1, VisibleHeight)
+      val w2 = NominalWidth - w1
+      if (w2 > 0) g.fillRect(0, 0, w2, VisibleHeight)
+
+    } else {
+      g.fillRect(0, 0, VisibleWidth, VisibleHeight)
+    }
 
     if (drawText) {
       val atOrig = g.getTransform
@@ -284,10 +308,6 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
     {
 //      val atOrig = g.getTransform
 //      val sx = 1.0
-      val sx = 540.0 / 1280 * (16.0/9) / (4.0/3)
-      val sy = 540.0 / 1280
-//      val tx = (analysisFrames * 6) % 1920
-      val tx = (frameIdx % (1920 * 4)) * 0.25
       val ty = 0
 //      g.scale(1.0, 540.0 / 1280)
 //      g.translate((frameIdx * 4) % 1920, 0)
@@ -306,6 +326,18 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
       val _triP = anaCurrent.triPrev
       val _triN = anaCurrent.triNext
 
+      // automatically wraps around visible width.
+      // lines that "break" across the bounary are simply not drawn.
+      def drawLine(x1: Int, y1: Int, x2: Int, y2: Int): Unit = {
+        val b   = x1 <= x2
+        val x1m = IntFunctions.wrap(x1, 0, VisibleWidth)
+        val x2m = IntFunctions.wrap(x2, 0, VisibleWidth)
+        val bm  = x1m < x2m
+        if (b == bm) {
+          g.drawLine(x1m, y1, x2m, y2)
+        }
+      }
+
       var i = 0
       if (inTime) while (i < _triP.length) {
         val tri = _triP(i)
@@ -319,7 +351,7 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
           val y11 = (_ln.y1 * sy + ty).toInt
           val x21 = (_ln.x2 * sx + tx).toInt
           val y21 = (_ln.y2 * sy + ty).toInt
-          g.drawLine(x11, y11, x21, y21)
+          drawLine(x11, y11, x21, y21)
 
           _ln.x1 = tri.x2
           _ln.y1 = tri.y2
@@ -330,7 +362,7 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
           val y12 = (_ln.y1 * sy + ty).toInt
           val x22 = (_ln.x2 * sx + tx).toInt
           val y22 = (_ln.y2 * sy + ty).toInt
-          g.drawLine(x12, y12, x22, y22)
+          drawLine(x12, y12, x22, y22)
 
           _ln.x1 = tri.x3
           _ln.y1 = tri.y3
@@ -341,7 +373,7 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
           val y13 = (_ln.y1 * sy + ty).toInt
           val x23 = (_ln.x2 * sx + tx).toInt
           val y23 = (_ln.y2 * sy + ty).toInt
-          g.drawLine(x13, y13, x23, y23)
+          drawLine(x13, y13, x23, y23)
         }
         i += 1
       }
@@ -360,7 +392,7 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
           val y11 = (_ln.y1 * sy + ty).toInt
           val x21 = (_ln.x2 * sx + tx).toInt
           val y21 = (_ln.y2 * sy + ty).toInt
-          g.drawLine(x11, y11, x21, y21)
+          drawLine(x11, y11, x21, y21)
 
           _ln.x1 = tri.x2
           _ln.y1 = tri.y2
@@ -371,7 +403,7 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
           val y12 = (_ln.y1 * sy + ty).toInt
           val x22 = (_ln.x2 * sx + tx).toInt
           val y22 = (_ln.y2 * sy + ty).toInt
-          g.drawLine(x12, y12, x22, y22)
+          drawLine(x12, y12, x22, y22)
 
           _ln.x1 = tri.x3
           _ln.y1 = tri.y3
@@ -382,7 +414,7 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
           val y13 = (_ln.y1 * sy + ty).toInt
           val x23 = (_ln.x2 * sx + tx).toInt
           val y23 = (_ln.y2 * sy + ty).toInt
-          g.drawLine(x13, y13, x23, y23)
+          drawLine(x13, y13, x23, y23)
 
         } else {
           val triN = tri
@@ -395,9 +427,9 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
           val y2   = ((triN.y2 * fadeIn + triP.y(perm._2) * fadeOut) * sy + ty).toInt
           val x3   = ((triN.x3 * fadeIn + triP.x(perm._3) * fadeOut) * sx + tx).toInt
           val y3   = ((triN.y3 * fadeIn + triP.y(perm._3) * fadeOut) * sy + ty).toInt
-          g.drawLine(x1, y1, x2, y2)
-          g.drawLine(x2, y2, x3, y3)
-          g.drawLine(x3, y3, x1, y1)
+          drawLine(x1, y1, x2, y2)
+          drawLine(x2, y2, x3, y3)
+          drawLine(x3, y3, x1, y1)
         }
         i += 1
       }
