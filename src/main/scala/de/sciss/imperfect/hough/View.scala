@@ -17,9 +17,11 @@ import java.awt.event.{ActionEvent, ActionListener, KeyAdapter, KeyEvent, MouseA
 import java.awt.image.BufferedImage
 import java.awt.{BasicStroke, Color, EventQueue, Font, Frame, GraphicsDevice, GraphicsEnvironment, Point, RenderingHints}
 import java.io.PrintStream
+import javax.imageio.ImageIO
 import javax.swing.Timer
 
 import akka.actor.{ActorRef, ActorSystem}
+import de.sciss.file._
 import de.sciss.imperfect.hough.MainLoop.Start
 import de.sciss.imperfect.hough.Source.Analysis
 import de.sciss.imperfect.hough.View.Config
@@ -33,20 +35,11 @@ object View {
                           useGrabber: Boolean = false, antiAliasing: Boolean = true,
                           breadCrumbs: Boolean = true,
                           cameraIP: String = "192.168.0.41", cameraPassword: String = "???",
-                          useIPCam: Boolean = false, camHAngleStep: Double = 1.0, camVAngle: Double = 0.0)
+                          useIPCam: Boolean = false, camHAngleStep: Double = 1.0, camVAngle: Double = 0.0,
+                          templateOut: Option[File] = None, writeFrames: Int = 0)
 
   def main(args: Array[String]): Unit = {
-    val p = new scopt.OptionParser[Config]("Imperfect-RaspiPlayer") {
-      //      opt[File]("test-video")
-      //        .text ("Test video file")
-      //        .required()
-      //        .action { (f, c) => c.copy(testVideo = f) }
-
-      //      opt[Int] ('s', "start-frame")
-      //        .text ("Start frame index")
-      //        .action   { (v, c) => c.copy(startFrame = v) }
-      //        .validate {  v     => if (v >= 0) success else failure("start-frame must be >= 0") }
-
+    val p = new scopt.OptionParser[Config]("Imperfect-Hough") {
       opt[String] ('s', "screen")
         .text ("Screen identifier")
         .action   { (v, c) => c.copy(screenId = v) }
@@ -89,6 +82,14 @@ object View {
       opt[Double] ("v-angle")
         .text ("Camera PTZ vertical angle (degrees; default: 0.0)")
         .action   { (v, c) => c.copy(camVAngle = v, useIPCam = true) }
+
+      opt[File]("output")
+        .text ("Write frame sequence as image files (template, use %d as frame-index placeholder).")
+        .action { (v, c) => c.copy(templateOut = Some(v)) }
+
+      opt[Int]("write-frames")
+        .text ("Maximum number of frames to write as image files (default: 0 - no limit).")
+        .action { (v, c) => c.copy(writeFrames = v) }
     }
     p.parse(args, Config()).fold(sys.exit(1)) { config =>
       if (config.listScreens) {
@@ -118,9 +119,11 @@ object View {
   }
 }
 final class View(system: ActorSystem, config: Config, source: ActorRef, loop: ActorRef) {
+  private[this] val antiAliasing  = config.antiAliasing
+  private[this] val breadCrumbs   = config.breadCrumbs
+  private[this] val writeOutput   = config.templateOut.isDefined
+
   def run(): Unit = {
-    this.antiAliasing = config.antiAliasing
-    this.breadCrumbs  = config.breadCrumbs
     import config._
     val screens = GraphicsEnvironment.getLocalGraphicsEnvironment.getScreenDevices
     val opt1: Option[GraphicsDevice] = if (screenId.isEmpty) None else {
@@ -197,23 +200,44 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
           val g = strategy.getDrawGraphics
           if (width == NominalWidth && height == NominalHeight) {
             g.drawImage(OffScreenImg,            0,             0, NominalWidth, VisibleHeight,
-              0,             0, NominalWidth, VisibleHeight, null)
+                                                 0,             0, NominalWidth, VisibleHeight, null)
             g.drawImage(OffScreenImg,            0, VisibleHeight, NominalWidth, NominalHeight,
-              NominalWidth,             0, VisibleWidth, VisibleHeight, null)
+                                      NominalWidth,             0, VisibleWidth, VisibleHeight, null)
           } else {
             if (!haveWarnedWinSize) {
               warn(s"Full screen window has dimensions $width x $height instead of $NominalWidth x $NominalHeight")
               haveWarnedWinSize = true
             }
             g.drawImage(OffScreenImg,            0,        0, width,        height/2,
-              0,        0, NominalWidth, VisibleHeight, null)
+                                                 0,        0, NominalWidth, VisibleHeight, null)
             g.drawImage(OffScreenImg,            0, height/2, width,        height,
-              NominalWidth,        0, VisibleWidth, VisibleHeight, null)
+                                      NominalWidth,        0, VisibleWidth, VisibleHeight, null)
             g.dispose()
           }
         } while (strategy.contentsRestored())
         strategy.show()
       } while (strategy.contentsLost())
+
+      if (writeOutput && (config.writeFrames <= 0 || frameIdx <= config.writeFrames)) {
+        val temp = config.templateOut.get
+        val fOut = temp.parent / temp.name.format(frameIdx)
+        if (!fOut.exists()) {
+          val img = new BufferedImage(NominalWidth, NominalHeight,
+            if (config.antiAliasing) BufferedImage.TYPE_BYTE_GRAY else BufferedImage.TYPE_BYTE_BINARY)
+          val g = img.createGraphics()
+          g.drawImage(OffScreenImg,            0,             0, NominalWidth, VisibleHeight,
+                                               0,             0, NominalWidth, VisibleHeight, null)
+          g.drawImage(OffScreenImg,            0, VisibleHeight, NominalWidth, NominalHeight,
+                                    NominalWidth,             0, VisibleWidth, VisibleHeight, null)
+          g.dispose()
+          val fmt = fOut.ext match {
+            case "png"  => "png"
+            case _      => "jpg"
+          }
+          ImageIO.write(img, fmt, fOut)
+          img.flush()
+        }
+      }
     }
 
     // ---- animation timer ----
@@ -236,8 +260,6 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
   private[this] var drawText      = false
   private[this] var animate       = true
   private[this] var frameIdx      = 0
-  private[this] var antiAliasing  = true
-  private[this] var breadCrumbs   = true
 
   private[this] val triNumFrames  = 40
 
@@ -280,7 +302,7 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
     //      val tx = (analysisFrames * 6) % 1920
     //      val tx = (frameIdx % (1920 * 4)) * 0.25
     //      val tx = frameIdx * 0.25
-    val tx = (frameIdx % (NominalWidth * 4)) * 0.25
+    val tx = (frameIdx % (VisibleWidth * 4)) * 0.25
 
     g.setColor(Color.black)
     if (breadCrumbs) {
