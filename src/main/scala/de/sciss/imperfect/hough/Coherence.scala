@@ -13,8 +13,6 @@
 
 package de.sciss.imperfect.hough
 
-import java.util
-
 object Coherence {
   final val permutations: Array[TriPerm] =
     Array(
@@ -29,24 +27,18 @@ object Coherence {
 class Coherence(maxTri: Int) {
   import Coherence._
 
-  private[this] val taken = new Array[Boolean](maxTri)
-
   /** Try align two sets of triangles.
     * Indices are `-1` for no match (triangle dies or is being born).
-    * Otherwise, there lower 29 bits refer to the corresponding other array
+    * Otherwise, there lower 28 bits refer to the corresponding other array
     * (`triPrev` in `indicesNext` or `triNext` in `indicesPrev`),
-    * and the highest three bits ''in `indicesNext`'' contain the permutation index
-    * (into `Coherence.permutations`).
-    *
-    * ''Note:'' the permutation index is not given for `indicesPrev`. If this is needed, the corresponding
-    * entry in `indicesNext` must be looked up.
+    * and bits 29 to 31 contain the permutation index (into `Coherence.permutations`).
+    * The highest bit is set if this triangle does not match any previous or successive
+    * triangle.
     *
     * @param triPrev        previous set of triangles
     * @param numTriPrev     number of valid entries in `triPrev`
     * @param triNext        next set of triangles
     * @param numTriNext     number of valid entries in `triNext`
-    * @param indicesPrev    result array for `triPrev`
-    * @param indicesNext    result array for `triNext`
     * @param leftTol        maximum movement of triangle to the left   (positive value)
     * @param rightTol       maximum movement of triangle to the right  (positive value)
     * @param topTol         maximum movement of triangle to the top    (positive value)
@@ -55,23 +47,28 @@ class Coherence(maxTri: Int) {
     * @return the number of matching triangles (for information purposes)
     */
   def run(triPrev: Array[Triangle], numTriPrev: Int, triNext: Array[Triangle], numTriNext: Int,
-          indicesPrev: Array[Int], indicesNext: Array[Int], leftTol: Int, rightTol: Int, topTol: Int,
-          bottomTol: Int): Int = {
+          leftTol: Int, rightTol: Int, topTol: Int, bottomTol: Int): Int = {
 
-    util.Arrays.fill(indicesPrev, 0, numTriPrev, -1   )
-    util.Arrays.fill(indicesNext, 0, numTriNext, -1   )
-    util.Arrays.fill(taken      , 0, numTriPrev, false)
+    var i = 0
+    while (i < numTriPrev) {
+      i += 1
+      val tri = triPrev(i)
+      tri.mkIncoherent()
+    }
+
+//    util.Arrays.fill(taken, 0, numTriPrev, false)
 
     var numMatches = 0
 
     // XXX TODO --- can we do better than quadratic?
-    var i = 0
+    i = 0
     while (i < numTriNext) {
       val triN = triNext(i)
+      triN.coh = -1
       var j = 0
       while (j < numTriPrev) {
-        if (!taken(j)) {
-          val triP = triPrev(j)
+        val triP = triPrev(j)
+        if (triP.isIncoherent) {
           val perm = permutations
           var p    = 0
           while (p < 6) {
@@ -88,9 +85,10 @@ class Coherence(maxTri: Int) {
                     if (dy2 >= -topTol && dy2 <= bottomTol) {
                       val dy3 = triN.y3 - triP.y(pi._3)
                       if (dy3 >= -topTol && dy3 <= bottomTol) {
-                        taken(j)        = true
-                        indicesPrev(j)  = i
-                        indicesNext(i)  = j | (p << 29)
+                        triP.mkCoherent()
+                        triN.coh        = j | (p << 28)
+//                        indicesPrev(j)  = i
+//                        indicesNext(i)  = j | (p << 28)
                         // abort loops
                         p               = 6
                         j               = numTriPrev
