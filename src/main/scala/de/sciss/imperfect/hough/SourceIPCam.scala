@@ -100,8 +100,8 @@ final class SourceIPCam(ip: String, password: String, hAngleStep: Double, vAngle
         toMat.convert(scaled)
       }
       val res = analyze(imgSc, dir = hAngleDir)
-      log.info(s"analyzed ${res.length}")
-      sender() ! MainLoop.Analysis(res)
+      log.info(s"analyzed ${res.triNext.length}")
+      sender() ! res
 
     case Open(_width, _height) =>
       log.info("opening")

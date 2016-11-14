@@ -29,6 +29,7 @@ object Source {
   case object Task
   case object Close
   final case class Control(flags: Int)
+  final case class Analysis(triPrev: Array[TriangleI], triNext: Array[TriangleI])
 
   final case class GrayImage  (img: BufferedImage)
   final case class ThreshImage(img: BufferedImage)
@@ -143,7 +144,7 @@ abstract class SourceLike extends Actor {
 
   private[this] var flipFlop = false
 
-  final def analyze(frame: Frame, dir: Int): Array[TriangleI] = {
+  final def analyze(frame: Frame, dir: Int): Analysis = {
     val _gray       = convertToGray(frame)
     val bw          = convertToBlackAndWhite(_gray, bwThresh)
     val lines       = lines1
@@ -195,24 +196,32 @@ abstract class SourceLike extends Actor {
     val numTriNext = analysis.findTriangles(lines = lines, numLines = numLines, triangles = triNext,
       minTriLen = anaCfg.minTriLen, width = width, height = height)
 
-    val baseTol   = 40
+    val baseTol   = 80 // 40
     val leftTol   = math.max(0, -dir) * baseTol + baseTol
     val rightTol  = math.max(0,  dir) * baseTol + baseTol
     val numMatch = coherence.run(triPrev = triPrev, numTriPrev = numTriPrev, triNext = triNext,
       numTriNext = numTriNext, // indicesPrev = triIdxPrev, indicesNext = triIdxNext,
       leftTol = leftTol, rightTol = rightTol, topTol = baseTol, bottomTol = baseTol)
 
-    log.info(s"found $numMatch triangle matches (${numMatch * 100 / numTriNext}%)")
+    log.info(s"found $numMatch triangle matches ${if (numTriNext == 0) "" else s"(${numMatch * 100 / numTriNext}%)"}")
 
-    val res = new Array[TriangleI](numTriNext)
+    val _numTriPrev = numTriPrev
+    val resPrev = new Array[TriangleI](_numTriPrev)
     var i = 0
+    while (i < _numTriPrev) {
+      resPrev(i) = triPrev(i).immutable
+      i += 1
+    }
+
+    val resNext = new Array[TriangleI](numTriNext)
+    i = 0
     while (i < numTriNext) {
-      res(i) = triNext(i).immutable
+      resNext(i) = triNext(i).immutable
       i += 1
     }
 
     numTriPrev = numTriNext
 
-    res
+    Analysis(triPrev = resPrev, triNext = resNext)
   }
 }

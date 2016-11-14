@@ -14,6 +14,7 @@
 package de.sciss.imperfect.hough
 
 import akka.actor.{Actor, ActorRef, ActorSystem, Props}
+import de.sciss.imperfect.hough.Source.Analysis
 
 import scala.swing.Swing
 
@@ -33,7 +34,6 @@ object MainLoop {
 
   case object Start
   case object Stop
-  case class Analysis(lines: Array[TriangleI])
 
   def props(source: ActorRef): Props = Props(new MainLoop(source))
 }
@@ -46,9 +46,11 @@ class MainLoop(source: ActorRef) extends Actor {
       source ! Source.Task
 //      source ! Source.Close
 
-    case Analysis(lines) =>
+    case Analysis(triPrev, triNext) =>
       Swing.onEDT {
-        View.triangles       = lines
+        View.triPrev  = triPrev // View.triNext
+        View.triNext  = triNext // lines
+        View.triPhase = 0
         View.analysisFrames += 1
       }
       source ! Source.Task

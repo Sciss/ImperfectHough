@@ -218,9 +218,18 @@ object View {
   private[this] var antiAliasing  = true
 
   // @volatile
-  var triangles = Array.empty[TriangleI]
+  var triPrev   = Array.empty[TriangleI]
+  var triNext   = Array.empty[TriangleI]
+  var triPhase  = 0
 
   var analysisFrames = 0
+
+  private[this] val line = new Line(0, 0, 0, 0)
+
+  private[this] val atanMul1  = 4.0
+  private[this] val atanAdd1  = -atanMul1/2
+  private[this] val atanAdd2  = math.atan(atanMul1/2)
+  private[this] val atanMul2  = 1.0 / (2 * atanAdd2)
 
   def paintOffScreen(): Unit = {
     val g = OffScreenG
@@ -243,28 +252,123 @@ object View {
 //      val sx = 1.0
       val sx = 540.0 / 1280 * (16.0/9) / (4.0/3)
       val sy = 540.0 / 1280
-      val tx = (analysisFrames * 6) % 1920
+//      val tx = (analysisFrames * 6) % 1920
+      val tx = (frameIdx % (1920 * 4)) * 0.25
       val ty = 0
 //      g.scale(1.0, 540.0 / 1280)
 //      g.translate((frameIdx * 4) % 1920, 0)
       g.setColor(Color.white)
       g.setStroke(new BasicStroke(2f))
       if (antiAliasing) g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+
+      val inTime    = triPhase <= 40
+      val phase     = triPhase / 40.0 // 20.0
+//      val fadeIn    = math.min(1.0, phase)
+      val fadeIn    = (math.atan(math.min(1.0, phase) * atanMul1 + atanAdd1) + atanAdd2) * atanMul2
+//      println(fadeIn)
+      val fadeOut   = 1.0 - fadeIn
+
+      val _ln   = line
+      val _triP = triPrev
+      val _triN = triNext
+
       var i = 0
-      val _tri = triangles
-      while (i < _tri.length) {
-        val tri = _tri(i)
-        val x1 = (tri.x1 * sx + tx).toInt
-        val y1 = (tri.y1 * sy + ty).toInt
-        val x2 = (tri.x2 * sx + tx).toInt
-        val y2 = (tri.y2 * sy + ty).toInt
-        val x3 = (tri.x3 * sx + tx).toInt
-        val y3 = (tri.y3 * sy + ty).toInt
-        g.drawLine(x1, y1, x2, y2)
-        g.drawLine(x2, y2, x3, y3)
-        g.drawLine(x3, y3, x1, y1)
+      if (inTime) while (i < _triP.length) {
+        val tri = _triP(i)
+        if (tri.isIncoherent) {
+          _ln.x1 = tri.x1
+          _ln.y1 = tri.y1
+          _ln.x2 = tri.x2
+          _ln.y2 = tri.y2
+          Analyze.resizeLine(_ln, _ln, width = 1920, height = 1080, factor = fadeOut)
+          val x11 = (_ln.x1 * sx + tx).toInt
+          val y11 = (_ln.y1 * sy + ty).toInt
+          val x21 = (_ln.x2 * sx + tx).toInt
+          val y21 = (_ln.y2 * sy + ty).toInt
+          g.drawLine(x11, y11, x21, y21)
+
+          _ln.x1 = tri.x2
+          _ln.y1 = tri.y2
+          _ln.x2 = tri.x3
+          _ln.y2 = tri.y3
+          Analyze.resizeLine(_ln, _ln, width = 1920, height = 1080, factor = fadeOut)
+          val x12 = (_ln.x1 * sx + tx).toInt
+          val y12 = (_ln.y1 * sy + ty).toInt
+          val x22 = (_ln.x2 * sx + tx).toInt
+          val y22 = (_ln.y2 * sy + ty).toInt
+          g.drawLine(x12, y12, x22, y22)
+
+          _ln.x1 = tri.x3
+          _ln.y1 = tri.y3
+          _ln.x2 = tri.x1
+          _ln.y2 = tri.y1
+          Analyze.resizeLine(_ln, _ln, width = 1920, height = 1080, factor = fadeOut)
+          val x13 = (_ln.x1 * sx + tx).toInt
+          val y13 = (_ln.y1 * sy + ty).toInt
+          val x23 = (_ln.x2 * sx + tx).toInt
+          val y23 = (_ln.y2 * sy + ty).toInt
+          g.drawLine(x13, y13, x23, y23)
+        }
         i += 1
       }
+
+      val _perm = Coherence.permutations
+      i = 0
+      while (i < _triN.length) {
+        val tri = _triN(i)
+        if (tri.isIncoherent) {
+          _ln.x1 = tri.x1
+          _ln.y1 = tri.y1
+          _ln.x2 = tri.x2
+          _ln.y2 = tri.y2
+          Analyze.resizeLine(_ln, _ln, width = 1920, height = 1080, factor = fadeIn)
+          val x11 = (_ln.x1 * sx + tx).toInt
+          val y11 = (_ln.y1 * sy + ty).toInt
+          val x21 = (_ln.x2 * sx + tx).toInt
+          val y21 = (_ln.y2 * sy + ty).toInt
+          g.drawLine(x11, y11, x21, y21)
+
+          _ln.x1 = tri.x2
+          _ln.y1 = tri.y2
+          _ln.x2 = tri.x3
+          _ln.y2 = tri.y3
+          Analyze.resizeLine(_ln, _ln, width = 1920, height = 1080, factor = fadeIn)
+          val x12 = (_ln.x1 * sx + tx).toInt
+          val y12 = (_ln.y1 * sy + ty).toInt
+          val x22 = (_ln.x2 * sx + tx).toInt
+          val y22 = (_ln.y2 * sy + ty).toInt
+          g.drawLine(x12, y12, x22, y22)
+
+          _ln.x1 = tri.x3
+          _ln.y1 = tri.y3
+          _ln.x2 = tri.x1
+          _ln.y2 = tri.y1
+          Analyze.resizeLine(_ln, _ln, width = 1920, height = 1080, factor = fadeIn)
+          val x13 = (_ln.x1 * sx + tx).toInt
+          val y13 = (_ln.y1 * sy + ty).toInt
+          val x23 = (_ln.x2 * sx + tx).toInt
+          val y23 = (_ln.y2 * sy + ty).toInt
+          g.drawLine(x13, y13, x23, y23)
+
+        } else {
+          val triN = tri
+          val triP = _triP(tri.prevIndex)
+          val perm = _perm(tri.prevPerm)
+
+          val x1   = ((triN.x1 * fadeIn + triP.x(perm._1) * fadeOut) * sx + tx).toInt
+          val y1   = ((triN.y1 * fadeIn + triP.y(perm._1) * fadeOut) * sy + ty).toInt
+          val x2   = ((triN.x2 * fadeIn + triP.x(perm._2) * fadeOut) * sx + tx).toInt
+          val y2   = ((triN.y2 * fadeIn + triP.y(perm._2) * fadeOut) * sy + ty).toInt
+          val x3   = ((triN.x3 * fadeIn + triP.x(perm._3) * fadeOut) * sx + tx).toInt
+          val y3   = ((triN.y3 * fadeIn + triP.y(perm._3) * fadeOut) * sy + ty).toInt
+          g.drawLine(x1, y1, x2, y2)
+          g.drawLine(x2, y2, x3, y3)
+          g.drawLine(x3, y3, x1, y1)
+        }
+        i += 1
+      }
+
+      triPhase += 1
 //      g.setTransform(atOrig)
     }
 

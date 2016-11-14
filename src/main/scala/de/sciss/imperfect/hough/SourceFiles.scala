@@ -43,7 +43,7 @@ final class SourceFiles extends SourceLike with Actor {
         /* fx = */ scale, /* fy = 0.0 */ scale, /* interp = */ opencv_imgproc.INTER_LANCZOS4)
       val frame = toMat.convert(scaled)
       val res = analyze(frame, dir = 0)
-      sender() ! MainLoop.Analysis(res)
+      sender() ! res
 
     case Open(_width, _height) =>
       log.info("opening")
