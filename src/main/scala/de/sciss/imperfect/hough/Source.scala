@@ -104,15 +104,18 @@ abstract class SourceLike extends Actor {
     blackWhite
   }
 
-  private[this] var bwThresh  = 127
-  private[this] val minLines  = 640
-  private[this] val maxLines  = 2560
-  private[this] val lines1    = Array.fill (maxLines)(new Line(0, 0, 0, 0))
-  private[this] val lines2    = Array.fill (maxLines)(new Line(0, 0, 0, 0))
-  private[this] val hough     = new Hough  (maxLines)
-  private[this] val analysis  = new Analyze(maxLines)
+  private[this] var bwThresh      = 127
+  private[this] val minLines      = 640
+  private[this] val maxLines      = 2560
+  private[this] val maxTriangles  = maxLines/2
+  private[this] val lines1        = Array.fill (maxLines)(new Line(0, 0, 0, 0))
+  //  private[this] val lines2    = Array.fill (maxLines)(new Line(0, 0, 0, 0))
+  private[this] val triangles1    = Array.fill (maxTriangles)(new Triangle(0, 0, 0, 0, 0, 0))
+  private[this] val triangles2    = Array.fill (maxTriangles)(new Triangle(0, 0, 0, 0, 0, 0))
+  private[this] val hough         = new Hough  (maxLines)
+  private[this] val analysis      = new Analyze(maxLines)
 
-  protected final val log     = Logging(context.system, this)
+  protected final val log         = Logging(context.system, this)
 
   @tailrec
   private def mkHough(in: Mat, lines: Array[Line]): Int = {
@@ -135,10 +138,12 @@ abstract class SourceLike extends Actor {
 
   private[this] var flipFlop = false
 
-  final def analyze(frame: Frame): Array[LineI] = {
+  final def analyze(frame: Frame): Array[TriangleI] = {
     val _gray     = convertToGray(frame)
     val bw        = convertToBlackAndWhite(_gray, bwThresh)
-    val lines     = if (flipFlop) lines2 else lines1
+    val lines     = lines1
+    val triangles = if (flipFlop) triangles2 else triangles1
+
     flipFlop      = !flipFlop
     var numLines  = mkHough(_gray, lines)
 
@@ -178,34 +183,14 @@ abstract class SourceLike extends Actor {
       actor ! LinesExt(arr)
     }
 
-    val numTriLn = if (anaCfg.useTri) {
-      analysis.calcIntersections(lines, numLines = numLines, minAngDeg = anaCfg.minAngDeg)
-      analysis.findTriangles2   (lines, numLines = numLines, minTriLen = anaCfg.minTriLen, width = width, height = height)
-    } else {
-      numLines
-    }
+    analysis.calcIntersections(lines, numLines = numLines, minAngDeg = anaCfg.minAngDeg)
+    val numTri = analysis.findTriangles(lines = lines, numLines = numLines, triangles = triangles,
+      minTriLen = anaCfg.minTriLen, width = width, height = height)
 
-    //      var minX, minY, maxX, maxY = 0
-    //      res.foreach { ln =>
-    //        val x1 = ln.pt1.x
-    //        val y1 = ln.pt1.y
-    //        val x2 = ln.pt2.x
-    //        val y2 = ln.pt2.y
-    //        if (x1 < minX) minX = x1
-    //        if (x1 > maxX) maxX = x1
-    //        if (y1 < minX) minX = y1
-    //        if (y1 > maxX) maxX = y1
-    //        if (x2 < minY) minY = x2
-    //        if (x2 > maxY) maxY = x2
-    //        if (y2 < minY) minY = y2
-    //        if (y2 > maxY) maxY = y2
-    //      }
-    //      log.debug(s"analysis yielded ${res.size} lines ($minX, $minY, $maxX, $maxY)")
-
-    val res = new Array[LineI](numTriLn)
+    val res = new Array[TriangleI](numTri)
     var i = 0
-    while (i < numTriLn) {
-      res(i) = lines(i).immutable
+    while (i < numTri) {
+      res(i) = triangles(i).immutable
       i += 1
     }
 

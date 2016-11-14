@@ -19,5 +19,6 @@ class Coherence(maxLines: Int) {
           indices: Array[Int], leftTol: Int, rightTol: Int, topTol: Int, bottomTol: Int): Unit = {
 
 
+
   }
 }

@@ -218,9 +218,9 @@ object View {
   private[this] var antiAliasing  = true
 
   // @volatile
-  var lines = Array.empty[LineI]
+  var triangles = Array.empty[TriangleI]
 
-  var linesFrame = 0
+  var analysisFrames = 0
 
   def paintOffScreen(): Unit = {
     val g = OffScreenG
@@ -243,20 +243,28 @@ object View {
 //      val sx = 1.0
       val sx = 540.0 / 1280 * (16.0/9) / (4.0/3)
       val sy = 540.0 / 1280
-      val tx = (linesFrame * 6) % 1920
+      val tx = (analysisFrames * 6) % 1920
       val ty = 0
 //      g.scale(1.0, 540.0 / 1280)
 //      g.translate((frameIdx * 4) % 1920, 0)
       g.setColor(Color.white)
       g.setStroke(new BasicStroke(2f))
       if (antiAliasing) g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-      lines.foreach { ln =>
-        val x1 = (ln.x1 * sx + tx).toInt
-        val y1 = (ln.y1 * sy + ty).toInt
-        val x2 = (ln.x2 * sx + tx).toInt
-        val y2 = (ln.y2 * sy + ty).toInt
+      var i = 0
+      val _tri = triangles
+      while (i < _tri.length) {
+        val tri = _tri(i)
+        val x1 = (tri.x1 * sx + tx).toInt
+        val y1 = (tri.y1 * sy + ty).toInt
+        val x2 = (tri.x2 * sx + tx).toInt
+        val y2 = (tri.y2 * sy + ty).toInt
+        val x3 = (tri.x3 * sx + tx).toInt
+        val y3 = (tri.y3 * sy + ty).toInt
 //        g.drawLine(pt1.x, pt1.y, pt2.x, pt2.y)
         g.drawLine(x1, y1, x2, y2)
+        g.drawLine(x2, y2, x3, y3)
+        g.drawLine(x3, y3, x1, y1)
+        i += 1
       }
 //      g.setTransform(atOrig)
     }

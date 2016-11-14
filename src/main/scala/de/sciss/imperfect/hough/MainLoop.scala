@@ -33,7 +33,7 @@ object MainLoop {
 
   case object Start
   case object Stop
-  case class Analysis(lines: Array[LineI])
+  case class Analysis(lines: Array[TriangleI])
 
   def props(source: ActorRef): Props = Props(new MainLoop(source))
 }
@@ -48,8 +48,8 @@ class MainLoop(source: ActorRef) extends Actor {
 
     case Analysis(lines) =>
       Swing.onEDT {
-        View.lines       = lines
-        View.linesFrame += 1
+        View.triangles       = lines
+        View.analysisFrames += 1
       }
       source ! Source.Task
 
