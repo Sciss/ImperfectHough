@@ -17,15 +17,15 @@ import org.bytedeco.javacpp.indexer.IntRawIndexer
 import org.bytedeco.javacpp.opencv_core.Mat
 import org.bytedeco.javacpp.opencv_imgproc
 
-final class Hough(lines: Array[Line]) {
+final class Hough(maxLines: Int) {
 //  private[this] val minLineLen  = 50
 //  private[this] val maxLineGap  = 20
-  private[this] val maxLines    = lines.length
   private[this] val linesMat    = new Mat()
   private[this] val rho         = 1.0
   private[this] val theta       = 1.0.toRadians
 
-  def apply(matIn: Mat, minLineLen: Int = 50, maxLineGap: Int = 20, thresh: Int = 50, force: Boolean = false): Int = {
+  def run(matIn: Mat, lines: Array[Line], minLineLen: Int = 50, maxLineGap: Int = 20, thresh: Int = 50,
+          force: Boolean = false): Int = {
     opencv_imgproc.HoughLinesP(matIn, linesMat, rho, theta, thresh, minLineLen, maxLineGap)
 
     val indexer: IntRawIndexer = try {

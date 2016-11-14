@@ -107,8 +107,8 @@ abstract class SourceLike extends Actor {
   private[this] var bwThresh  = 127
   private[this] val minLines  = 640
   private[this] val maxLines  = 2560
-  private[this] val lines     = Array.fill(maxLines)(new Line(0, 0, 0, 0))
-  private[this] val hough     = new Hough(lines)
+  private[this] val lines     = Array.fill (maxLines)(new Line(0, 0, 0, 0))
+  private[this] val hough     = new Hough  (maxLines)
   private[this] val analysis  = new Analyze(maxLines)
 
   protected final val log     = Logging(context.system, this)
@@ -117,7 +117,7 @@ abstract class SourceLike extends Actor {
   private def mkHough(in: Mat): Int = {
     val bw        = convertToBlackAndWhite(in, bwThresh)
     val force     = bwThresh > 250
-    val numLines  = hough(matIn = bw, force = force)
+    val numLines  = hough.run(matIn = bw, lines = lines, force = force)
     val tooHigh   = numLines > maxLines
     if (tooHigh && !force) {
       bwThresh += 2
