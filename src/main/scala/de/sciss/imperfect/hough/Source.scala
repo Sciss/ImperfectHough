@@ -15,7 +15,7 @@ package de.sciss.imperfect.hough
 
 import java.awt.image.BufferedImage
 
-import akka.actor.{Actor, ActorRef, Props}
+import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 import akka.event.Logging
 import org.bytedeco.javacpp.indexer.UByteRawIndexer
 import org.bytedeco.javacpp.opencv_core.{Mat, Size}
@@ -35,6 +35,16 @@ object Source {
   final case class ThreshImage(img: BufferedImage)
   final case class LinesIn    (arr: Array[LineI])
   final case class LinesExt   (arr: Array[LineI])
+
+  def apply(system: ActorSystem, config: View.Config): ActorRef = {
+    val sourceP = if (config.useGrabber) Source.live()
+    else if (config.useIPCam  ) Source.ipCam(ip = config.cameraIP, password = config.cameraPassword,
+      hAngleStep = config.camHAngleStep, vAngle = config.camVAngle)
+    else                        Source.files()
+
+    val source  = system.actorOf(sourceP, "source")
+    source
+  }
 
   def live (): Props = Props(new SourceLive)
   def files(): Props = Props(new SourceFiles)

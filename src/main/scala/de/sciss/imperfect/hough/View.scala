@@ -20,6 +20,11 @@ import java.io.PrintStream
 import javax.swing.Timer
 
 import akka.actor.{ActorRef, ActorSystem}
+import de.sciss.imperfect.hough.MainLoop.Start
+import de.sciss.imperfect.hough.Source.Analysis
+import de.sciss.imperfect.hough.View.Config
+
+import scala.swing.Swing
 
 object View {
   final case class Config(verbose: Boolean = false, screenId: String = "", ctlScreenId: String = "",
@@ -86,14 +91,18 @@ object View {
       }
 
       val system      = ActorSystem("system")
-      val sourceActor = MainLoop.run(system, config)
+      val source      = Source  (system, config)
+      val loop        = MainLoop(system, source = source, config = config)
       EventQueue.invokeLater(new Runnable {
-        def run(): Unit = View.run(system, config, sourceActor)
+        def run(): Unit = {
+          val view = new View(system, config, source = source, loop = loop)
+          view.run()
+        }
       })
     }
   }
 
-  private[this] def printScreens(out: PrintStream): Unit = {
+  def printScreens(out: PrintStream): Unit = {
     val screens = GraphicsEnvironment.getLocalGraphicsEnvironment.getScreenDevices
     val s = screens.map { dev =>
       val m = dev.getDisplayMode
@@ -101,8 +110,9 @@ object View {
     } .sorted.mkString("  ", "\n  ", "")
     out.println(s)
   }
-
-  def run(system: ActorSystem, config: Config, sourceActor: ActorRef): Unit = {
+}
+final class View(system: ActorSystem, config: Config, source: ActorRef, loop: ActorRef) {
+  def run(): Unit = {
     this.antiAliasing = config.antiAliasing
     import config._
     val screens = GraphicsEnvironment.getLocalGraphicsEnvironment.getScreenDevices
@@ -110,7 +120,7 @@ object View {
       val res = screens.find(_.getIDstring == screenId)
       if (res.isEmpty) {
         warn(s"screen '$screenId' not found.")
-        printScreens(Console.err)
+        View.printScreens(Console.err)
       }
       res
     }
@@ -125,7 +135,7 @@ object View {
       opt2.getOrElse(screens.head)
     }
 
-    lazy val controlWindow = new ControlWindow(system, config, sourceActor)
+    lazy val controlWindow = new ControlWindow(system, config, source)
 
     var haveWarnedWinSize = false
 
@@ -199,6 +209,7 @@ object View {
       } while (strategy.contentsLost())
     }
 
+    // ---- animation timer ----
     val t = new Timer(12, new ActionListener {
       def actionPerformed(e: ActionEvent): Unit =
         if (animate) {
@@ -208,6 +219,9 @@ object View {
     })
     t.setRepeats(true)
     t.start()
+
+    // ---- algorithm loop ----
+    loop ! Start(this)
   }
 
   private[this] val fntTest       = new Font(Font.SANS_SERIF, Font.BOLD, 500)
@@ -217,12 +231,32 @@ object View {
   private[this] var frameIdx      = 0
   private[this] var antiAliasing  = true
 
-  // @volatile
-  var triPrev   = Array.empty[TriangleI]
-  var triNext   = Array.empty[TriangleI]
-  var triPhase  = 0
+  private[this] val triNumFrames  = 40
 
-  var analysisFrames = 0
+  def update(a: Analysis): Unit = {
+    Swing.onEDT {
+      if (triPhase >= triNumFrames) {
+        if (anaPending == null) {
+          anaCurrent = a
+          loop ! Source.Task
+        } else {
+          anaCurrent = anaPending
+          anaPending = a
+        }
+        triPhase = 0
+        // analysisFrames += 1
+      } else {
+        if (anaPending != null) warn("Pending analysis overflow!")
+        anaPending = a
+      }
+    }
+  }
+
+  private[this] var anaPending: Analysis = _
+  private[this] var anaCurrent: Analysis = Analysis(Array.empty, Array.empty)
+  private[this] var triPhase  = triNumFrames
+
+//  private[this] var analysisFrames = 0
 
   private[this] val line = new Line(0, 0, 0, 0)
 
@@ -261,16 +295,16 @@ object View {
       g.setStroke(new BasicStroke(2f))
       if (antiAliasing) g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
 
-      val inTime    = triPhase <= 40
-      val phase     = triPhase / 40.0 // 20.0
+      val inTime    = triPhase <= triNumFrames
+      val phase     = triPhase.toDouble / triNumFrames
 //      val fadeIn    = math.min(1.0, phase)
       val fadeIn    = (math.atan(math.min(1.0, phase) * atanMul1 + atanAdd1) + atanAdd2) * atanMul2
 //      println(fadeIn)
       val fadeOut   = 1.0 - fadeIn
 
       val _ln   = line
-      val _triP = triPrev
-      val _triN = triNext
+      val _triP = anaCurrent.triPrev
+      val _triN = anaCurrent.triNext
 
       var i = 0
       if (inTime) while (i < _triP.length) {
@@ -369,7 +403,12 @@ object View {
       }
 
       triPhase += 1
-//      g.setTransform(atOrig)
+      if (triPhase >= triNumFrames && anaPending != null) {
+        triPhase    = 0
+        anaCurrent  = anaPending
+        anaPending  = null
+        loop ! Source.Task
+      }
     }
 
     if (drawRect) {

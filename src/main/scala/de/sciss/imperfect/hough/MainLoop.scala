@@ -16,44 +16,35 @@ package de.sciss.imperfect.hough
 import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 import de.sciss.imperfect.hough.Source.Analysis
 
-import scala.swing.Swing
-
 object MainLoop {
-  def run(system: ActorSystem, config: View.Config): ActorRef = {
-    val sourceP = if (config.useGrabber) Source.live()
-             else if (config.useIPCam  ) Source.ipCam(ip = config.cameraIP, password = config.cameraPassword,
-                                                      hAngleStep = config.camHAngleStep, vAngle = config.camVAngle)
-             else                        Source.files()
-
-    val source  = system.actorOf(sourceP, "source")
+  def apply(system: ActorSystem, source: ActorRef, config: View.Config): ActorRef = {
     val loopP   = props(source)
     val loop    = system.actorOf(loopP, "test")
-    loop ! Start
-    source
+    loop
   }
 
-  case object Start
+  final case class Start(view: View)
   case object Stop
 
   def props(source: ActorRef): Props = Props(new MainLoop(source))
 }
-class MainLoop(source: ActorRef) extends Actor {
+final class MainLoop(val source: ActorRef) extends Actor {
   import MainLoop._
 
+  private[this] var view: View = _
+
   def receive: Receive = {
-    case Start =>
+    case a: Analysis => view.update(a)
+//      source ! Source.Task
+
+      // forward this one:
+    case Source.Task => source ! Source.Task
+
+    case Start(_view) =>
+      view = _view
       source ! Source.Open(1920, 1080)
       source ! Source.Task
-//      source ! Source.Close
-
-    case Analysis(triPrev, triNext) =>
-      Swing.onEDT {
-        View.triPrev  = triPrev // View.triNext
-        View.triNext  = triNext // lines
-        View.triPhase = 0
-        View.analysisFrames += 1
-      }
-      source ! Source.Task
+    //      source ! Source.Close
 
     case Stop =>
       source ! Source.Close
