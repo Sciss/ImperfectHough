@@ -10,6 +10,9 @@ final class Triangle(var x1: Int, var y1: Int, var x2: Int, var y2: Int, var x3:
   def mkCoherent  (): Unit  =  coh &= 0x7FFFFFFF
   def mkIncoherent(): Unit  =  coh |= 0x80000000
 
+  def prevIndex: Int = coh & 0xfffffff
+  def prevPerm : Int = coh >>> 28   // assuming coherence
+
   def copyFrom(that: Triangle): Unit = {
     this.x1 = that.x1
     this.y1 = that.y1

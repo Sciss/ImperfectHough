@@ -51,9 +51,9 @@ class Coherence(maxTri: Int) {
 
     var i = 0
     while (i < numTriPrev) {
-      i += 1
       val tri = triPrev(i)
       tri.mkIncoherent()
+      i += 1
     }
 
 //    util.Arrays.fill(taken, 0, numTriPrev, false)
@@ -109,6 +109,31 @@ class Coherence(maxTri: Int) {
       i += 1
     }
 
+    // verify(triPrev = triPrev, numTriPrev = numTriPrev, triNext = triNext, numTriNext = numTriNext)
+
     numMatches
+  }
+
+  private def verify(triPrev: Array[Triangle], numTriPrev: Int, triNext: Array[Triangle], numTriNext: Int): Unit = {
+    // for every coherent previous triangle, there must be a next triangle
+    var i = 0
+    while (i < numTriPrev) {
+      val triP = triPrev(i)
+      if (triP.isCoherent) {
+        var found = false
+        var j = 0
+        while (j < numTriNext && !found) {
+          val triN = triNext(j)
+          if (triN.isCoherent && triN.prevIndex == i) {
+            found = true
+          }
+          j += 1
+        }
+        if (!found) {
+          warn(s"Coherence assignment verification failed for $i")
+        }
+      }
+      i += 1
+    }
   }
 }
