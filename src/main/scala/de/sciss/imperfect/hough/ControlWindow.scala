@@ -35,6 +35,10 @@ class ControlWindow(system: ActorSystem, config: Config, source: ActorRef) {
 
   private[this] var flags = 0
 
+  private[this] var image   : BufferedImage = _
+  private[this] var linesIn : Array[LineI]  = _
+  private[this] var linesExt: Array[LineI]  = _
+
   private[this] val ggGrayImage = new CheckBox("Gray Image") {
     listenTo(this)
     reactions += {
@@ -49,7 +53,23 @@ class ControlWindow(system: ActorSystem, config: Config, source: ActorRef) {
     }
   }
 
-  private[this] var image: BufferedImage = _
+  private[this] val ggLinesIn = new CheckBox("Input Lines") {
+    listenTo(this)
+    reactions += {
+      case ButtonClicked(_) =>
+        updateFlags()
+        if (!selected) linesIn = null
+    }
+  }
+
+  private[this] val ggLinesExt = new CheckBox("Extended Lines") {
+    listenTo(this)
+    reactions += {
+      case ButtonClicked(_) =>
+        updateFlags()
+        if (!selected) linesExt = null
+    }
+  }
 
   private[this] val ggImageView = new Component {
     private[this] val colrGreen = new Color(0, 0x80, 0)
@@ -61,12 +81,26 @@ class ControlWindow(system: ActorSystem, config: Config, source: ActorRef) {
       super.paintComponent(g)
       val w = peer.getWidth
       val h = peer.getHeight
+      g.scale(w / 1920.0, h / 1080.0)
       if (image == null) {
         g.setColor(colrGreen)
-        g.fillRect(0, 0, w, h)
+        g.fillRect(0, 0, 1920, 1080)
       } else {
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC)
-        g.drawImage(image, 0, 0, w, h, null)
+        g.drawImage(image, 0, 0, null)
+      }
+
+      if (linesExt != null) {
+        g.setColor(Color.red)
+        linesExt.foreach { ln =>
+          g.drawLine(ln.x1, ln.y1, ln.x2, ln.y2)
+        }
+      }
+      if (linesIn != null) {
+        g.setColor(Color.green)
+        linesIn.foreach { ln =>
+          g.drawLine(ln.x1, ln.y1, ln.x2, ln.y2)
+        }
       }
     }
   }
@@ -74,7 +108,7 @@ class ControlWindow(system: ActorSystem, config: Config, source: ActorRef) {
   private[this] val frame: Frame = new Frame(gc.orNull) {
     title = "Hough Control"
     contents = new BorderPanel {
-      add(new FlowPanel(ggGrayImage, ggThreshImage), BorderPanel.Position.North )
+      add(new FlowPanel(ggGrayImage, ggThreshImage, ggLinesIn, ggLinesExt), BorderPanel.Position.North )
       add(ggImageView, BorderPanel.Position.Center)
     }
     pack().centerOnScreen()
@@ -94,6 +128,16 @@ class ControlWindow(system: ActorSystem, config: Config, source: ActorRef) {
       case Source.Control(_flags) => source ! Source.Control(_flags)
       case Source.GrayImage  (img) => setImage(img)
       case Source.ThreshImage(img) => setImage(img)
+      case Source.LinesIn    (arr) =>
+        Swing.onEDT {
+          linesIn = arr
+          ggImageView.repaint()
+        }
+      case Source.LinesExt   (arr) =>
+        Swing.onEDT {
+          linesExt = arr
+          ggImageView.repaint()
+        }
 
       case x =>
         log.warning(s"Control window received unknown message '$x'")
@@ -107,6 +151,8 @@ class ControlWindow(system: ActorSystem, config: Config, source: ActorRef) {
     flags = 0
     if (ggGrayImage  .selected) flags |= Source.CtlGray
     if (ggThreshImage.selected) flags |= Source.CtlThresh
+    if (ggLinesIn    .selected) flags |= Source.CtlLinesIn
+    if (ggLinesExt   .selected) flags |= Source.CtlLinesExt
     if (flags != oldFlags) {
       actor ! Source.Control(flags)
     }

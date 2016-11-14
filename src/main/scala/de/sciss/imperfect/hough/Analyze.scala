@@ -19,8 +19,8 @@ import org.bytedeco.javacpp.opencv_core.Point
 
 object Analyze {
   case class Config(useProb: Boolean = true, filterSim: Boolean = true, minLineLen: Int = 50, minTriLen: Int = 20,
-                    maxLineGap: Int = 20, minAngDeg: Int = 11, useTri: Boolean = true,
-                    useExtend: Boolean = false /* true */)
+                    maxLineGap: Int = 20, minAngDeg: Int = 44 /* 11 */, useTri: Boolean = true,
+                    useExtend: Boolean = true)
 
   def extendLine(ln: Line, width: Int, height: Int): Unit = {
     val dy = ln.y2 - ln.y1
@@ -79,6 +79,82 @@ object Analyze {
       ln.y1 = y0i
       ln.x2 = x1i
       ln.y2 = y1i
+    }
+  }
+
+  private[this] val resizeAuxInt  = new Intersection(0, 0, 0)
+  private[this] val resizeAuxLine = new Line(0, 0, 0, 0)
+
+  def resizeLine(in: Line, out: Line, width: Int, height: Int, factor: Double): Unit = {
+    val cx = (in.x1 + in.x2) * 0.5
+    val cy = (in.y1 + in.y2) * 0.5
+    out.x1 = ((in.x1 - cx) * factor + cx + 0.5).toInt
+    out.y1 = ((in.y1 - cy) * factor + cy + 0.5).toInt
+    out.x2 = ((in.x2 - cx) * factor + cx + 0.5).toInt
+    out.y2 = ((in.y2 - cy) * factor + cy + 0.5).toInt
+
+    if (out.x1 < 0 || out.x2 < 0) {
+      resizeAuxLine.x1 = 0
+      resizeAuxLine.x2 = 0
+      resizeAuxLine.y1 = -height
+      resizeAuxLine.y2 =  height * 2
+      if (calcIntersection(out, resizeAuxLine, resizeAuxInt, 0)) {
+        if (out.x1 < 0) {
+          out.x1 = resizeAuxInt.x
+          out.y1 = resizeAuxInt.y
+        } else {
+          out.x2 = resizeAuxInt.x
+          out.y2 = resizeAuxInt.y
+        }
+      }
+    }
+
+    if (out.x1 >= width || out.x2 >= width) {
+      resizeAuxLine.x1 = width - 1
+      resizeAuxLine.x2 = width - 1
+      resizeAuxLine.y1 = -height
+      resizeAuxLine.y2 =  height * 2
+      if (calcIntersection(out, resizeAuxLine, resizeAuxInt, 0)) {
+        if (out.x1 >= width) {
+          out.x1 = resizeAuxInt.x
+          out.y1 = resizeAuxInt.y
+        } else {
+          out.x2 = resizeAuxInt.x
+          out.y2 = resizeAuxInt.y
+        }
+      }
+    }
+
+    if (out.y1 < 0 || out.y2 < 0) {
+      resizeAuxLine.x1 = -width
+      resizeAuxLine.x2 =  width * 2
+      resizeAuxLine.y1 = 0
+      resizeAuxLine.y2 = 0
+      if (calcIntersection(out, resizeAuxLine, resizeAuxInt, 0)) {
+        if (out.y1 < 0) {
+          out.x1 = resizeAuxInt.x
+          out.y1 = resizeAuxInt.y
+        } else {
+          out.x2 = resizeAuxInt.x
+          out.y2 = resizeAuxInt.y
+        }
+      }
+    }
+
+    if (out.y1 >= height || out.y2 >= height) {
+      resizeAuxLine.x1 = -width
+      resizeAuxLine.x2 =  width * 2
+      resizeAuxLine.y1 = height - 1
+      resizeAuxLine.y2 = height - 1
+      if (calcIntersection(out, resizeAuxLine, resizeAuxInt, 0)) {
+        if (out.y1 >= height) {
+          out.x1 = resizeAuxInt.x
+          out.y1 = resizeAuxInt.y
+        } else {
+          out.x2 = resizeAuxInt.x
+          out.y2 = resizeAuxInt.y
+        }
+      }
     }
   }
 
@@ -159,8 +235,10 @@ object Analyze {
     }
   }
 
+  private[this] val LineX1OrderingInv = LineX1Ordering.reverse
+
   def removeSimilarLines(lines: Array[Line], numIn: Int, dist: Int = 5): Int = {
-    util.Arrays.sort(lines, 0, numIn, LineX1Ordering)
+    util.Arrays.sort(lines, 0, numIn, LineX1OrderingInv)
     val distSq  = dist * dist
     var i       = 0
     var numOut  = 0
@@ -250,7 +328,7 @@ final class Analyze(maxLines: Int) {
   private[this] val triTemp           = Array.fill(maxLines)(new Line(0, 0, 0, 0))
   private[this] val triTaken          = new Array[Boolean](maxLines)
 
-  private def calcIntersections(lines: Array[Line], numLines: Int, minAngDeg: Int): Unit = {
+  def calcIntersections(lines: Array[Line], numLines: Int, minAngDeg: Int): Unit = {
     var ai = 0
     while (ai < numLines) {
       val count = numIntersectionsS(ai)
@@ -295,99 +373,188 @@ final class Analyze(maxLines: Int) {
     util.Arrays.sort(numIntersectionsS, 0, numLines, IntersectionCountOrdering)
   }
 
+  def extendLines(lines: Array[Line], numLines: Int, width: Int, height: Int, factor: Double = 1.1): Unit = {
+    var i = 0
+    while (i < numLines) {
+      val ln = lines(i)
+//        extendLine(lines(i), width = width, height = height)
+      resizeLine(in = ln, out = ln, width = width, height = height, factor = factor)
+      i += 1
+    }
+  }
+
+  def findTriangles(lines: Array[Line], numLines: Int, minTriLen: Int): Int = {
+    util.Arrays.fill(triTaken, 0, numLines, false)
+    val minTriLenSq = minTriLen * minTriLen
+    var numTriLines = 0
+    var p = 0
+    while (p < numLines) {
+      val count   = numIntersectionsS(p)
+      val i       = count.index
+      val numInt  = count.count
+      if (!triTaken(i) && numInt >= 2) {
+        val intIdx0 = i * maxLines
+        var intIdx1 = 0
+        val numIntM = numInt - 1
+        while (intIdx1 < numIntM) {
+          val int1 = intersections(intIdx0 + intIdx1)
+          assert(int1.isValid)
+          val j = int1.targetIdx
+          if (!triTaken(j)) {
+            var intIdx2 = intIdx1 + 1
+            while (intIdx2 < numInt) {
+              val int2 = intersections(intIdx0 + intIdx2)
+              assert(int2.isValid)
+              val k = int2.targetIdx
+              if (!triTaken(k)) {
+                val intIdx3 = j * maxLines + k
+                val int3    = intersections(intIdx3)
+
+                if (int3.isValid && (minTriLen == 0 || (
+                  lineLenPtSq(int1.x, int1.y, int2.x, int2.y) >= minTriLenSq &&
+                    lineLenPtSq(int2.x, int2.y, int3.x, int3.y) >= minTriLenSq &&
+                    lineLenPtSq(int3.x, int3.y, int1.x, int1.y) >= minTriLenSq
+                  ))) {
+
+                  val ln1 = triTemp(numTriLines); numTriLines += 1
+                  val ln2 = triTemp(numTriLines); numTriLines += 1
+                  val ln3 = triTemp(numTriLines); numTriLines += 1
+                  ln1.x1  = int1.x
+                  ln1.y1  = int1.y
+                  ln1.x2  = int2.x
+                  ln1.y2  = int2.y
+                  ln2.x1  = int2.x
+                  ln2.y1  = int2.y
+                  ln2.x2  = int3.x
+                  ln2.y2  = int3.y
+                  ln3.x1  = int3.x
+                  ln3.y1  = int3.y
+                  ln3.x2  = int1.x
+                  ln3.y2  = int1.y
+
+                  triTaken(i) = true
+                  triTaken(j) = true
+                  triTaken(k) = true
+
+                  // abort loops
+                  intIdx2 = numInt
+                  intIdx1 = numIntM
+                }
+              }
+              intIdx2 += 1
+            }
+          }
+          intIdx1 += 1
+        }
+      }
+      p += 1
+    }
+
+    //      println(s"tri - $count1 / $count2 / $count3")
+
+    p = 0
+    while (p < numTriLines) {
+      val a = lines  (p)
+      val b = triTemp(p)
+      a.copyFrom(b)
+      p += 1
+    }
+    numTriLines
+  }
+
+  private[this] val findTriAuxLine = new Line(0, 0, 0, 0)
+
+  def findTriangles2(lines: Array[Line], numLines: Int, minTriLen: Int, width: Int, height: Int,
+                     shrink: Double = 1.1): Int = {
+    util.Arrays.fill(triTaken, 0, numLines, false)
+    val minTriLenSq = minTriLen * minTriLen
+    var numTriLines = 0
+    var p = 0
+    while (p < numLines && numTriLines + 2 < maxLines) {
+      val count   = numIntersectionsS(p)
+      val i       = count.index
+      val numInt  = count.count
+      if (!triTaken(i) && numInt >= 2) {
+        val intIdx0 = i * maxLines
+        var intIdx1 = 0
+        val numIntM = numInt - 1
+        while (intIdx1 < numIntM) {
+          val int1 = intersections(intIdx0 + intIdx1)
+          assert(int1.isValid)
+          val j = int1.targetIdx
+          if (!triTaken(j)) {
+            val a   = lines(i)
+            val b   = lines(j)
+            val ad1 = lineLenPtSq(a.x1, a.y1, int1.x, int1.y)
+            val ad2 = lineLenPtSq(a.x2, a.y2, int1.x, int1.y)
+            val bd1 = lineLenPtSq(b.x1, b.y1, int1.x, int1.y)
+            val bd2 = lineLenPtSq(b.x2, b.y2, int1.x, int1.y)
+            resizeLine(in = a, out = findTriAuxLine, width = width, height = height, factor = shrink)
+            val x2  = if (ad1 < ad2) findTriAuxLine.x2 else findTriAuxLine.x1
+            val y2  = if (ad1 < ad2) findTriAuxLine.y2 else findTriAuxLine.y1
+            resizeLine(in = b, out = findTriAuxLine, width = width, height = height, factor = shrink)
+            val x3  = if (bd1 < bd2) findTriAuxLine.x2 else findTriAuxLine.x1
+            val y3  = if (bd1 < bd2) findTriAuxLine.y2 else findTriAuxLine.y1
+
+            if (minTriLen == 0 || (
+                lineLenPtSq(int1.x, int1.y, x2, y2) >= minTriLenSq &&
+                lineLenPtSq(x2, y2, x3, y3) >= minTriLenSq &&
+                lineLenPtSq(x3, y3, int1.x, int1.y) >= minTriLenSq
+              )) {
+
+              val ln1 = triTemp(numTriLines); numTriLines += 1
+              val ln2 = triTemp(numTriLines); numTriLines += 1
+              val ln3 = triTemp(numTriLines); numTriLines += 1
+              ln1.x1  = int1.x
+              ln1.y1  = int1.y
+              ln1.x2  = x2
+              ln1.y2  = y2
+              ln2.x1  = x2
+              ln2.y1  = y2
+              ln2.x2  = x3
+              ln2.y2  = y3
+              ln3.x1  = x3
+              ln3.y1  = y3
+              ln3.x2  = int1.x
+              ln3.y2  = int1.y
+
+              triTaken(i) = true
+              triTaken(j) = true
+
+              // abort loops
+              intIdx1 = numIntM
+            }
+          }
+          intIdx1 += 1
+        }
+      }
+      p += 1
+    }
+
+    //      println(s"tri - $count1 / $count2 / $count3")
+
+    p = 0
+    while (p < numTriLines) {
+      val a = lines  (p)
+      val b = triTemp(p)
+      a.copyFrom(b)
+      p += 1
+    }
+    numTriLines
+  }
+
   def run(lines: Array[Line], numLines0: Int, width: Int, height: Int, config: Config): Int = {
     import config._
 
     val numLines = if (filterSim) removeSimilarLines(lines, numLines0) else numLines0
 
-//    val minAngRad = minAngDeg.toRadians
-
     if (useExtend) {
-      var i = 0
-      while (i < numLines) {
-        extendLine(lines(i), width = width, height = height)
-        i += 1
-      }
+      extendLines(lines, numLines = numLines, width = width, height = height)
     }
 
     if (useTri) {
-      calcIntersections(lines, numLines, minAngDeg = minAngDeg)
-      util.Arrays.fill(triTaken, 0, numLines, false)
-      val minTriLenSq = minTriLen * minTriLen
-      var numTriLines = 0
-      var p = 0
-      while (p < numLines) {
-        val count   = numIntersectionsS(p)
-        val i       = count.index
-        val numInt  = count.count
-        if (!triTaken(i) && numInt >= 2) {
-          val intIdx0 = i * maxLines
-          var intIdx1 = 0
-          val numIntM = numInt - 1
-          while (intIdx1 < numIntM) {
-            val int1 = intersections(intIdx0 + intIdx1)
-            assert(int1.isValid)
-            val j = int1.targetIdx
-            if (!triTaken(j)) {
-              var intIdx2 = intIdx1 + 1
-              while (intIdx2 < numInt) {
-                val int2 = intersections(intIdx0 + intIdx2)
-                assert(int2.isValid)
-                val k = int2.targetIdx
-                if (!triTaken(k)) {
-                  val intIdx3 = j * maxLines + k
-                  val int3    = intersections(intIdx3)
-
-                  if (int3.isValid && (minTriLen == 0 || (
-                      lineLenPtSq(int1.x, int1.y, int2.x, int2.y) >= minTriLenSq &&
-                      lineLenPtSq(int2.x, int2.y, int3.x, int3.y) >= minTriLenSq &&
-                      lineLenPtSq(int3.x, int3.y, int1.x, int1.y) >= minTriLenSq
-                      ))) {
-
-                    val ln1 = triTemp(numTriLines); numTriLines += 1
-                    val ln2 = triTemp(numTriLines); numTriLines += 1
-                    val ln3 = triTemp(numTriLines); numTriLines += 1
-                    ln1.x1  = int1.x
-                    ln1.y1  = int1.y
-                    ln1.x2  = int2.x
-                    ln1.y2  = int2.y
-                    ln2.x1  = int2.x
-                    ln2.y1  = int2.y
-                    ln2.x2  = int3.x
-                    ln2.y2  = int3.y
-                    ln3.x1  = int3.x
-                    ln3.y1  = int3.y
-                    ln3.x2  = int1.x
-                    ln3.y2  = int1.y
-
-                    triTaken(i) = true
-                    triTaken(j) = true
-                    triTaken(k) = true
-
-                    // abort loops
-                    intIdx2 = numInt
-                    intIdx1 = numIntM
-                  }
-                }
-                intIdx2 += 1
-              }
-            }
-            intIdx1 += 1
-          }
-        }
-        p += 1
-      }
-
-//      println(s"tri - $count1 / $count2 / $count3")
-
-      p = 0
-      while (p < numTriLines) {
-        val a = lines  (p)
-        val b = triTemp(p)
-        a.copyFrom(b)
-        p += 1
-      }
-      numTriLines
+      calcIntersections(lines, numLines = numLines, minAngDeg = minAngDeg)
+      findTriangles    (lines, numLines = numLines, minTriLen = minTriLen)
 
     } else {
       numLines

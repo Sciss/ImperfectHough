@@ -241,7 +241,7 @@ object View {
 //      val sx = 1.0
       val sx = 540.0 / 1280 * (16.0/9) / (4.0/3)
       val sy = 540.0 / 1280
-      val tx = (frameIdx * 4) % 1920
+      val tx = 100 // (frameIdx * 4) % 1920
       val ty = 0
 //      g.scale(1.0, 540.0 / 1280)
 //      g.translate((frameIdx * 4) % 1920, 0)

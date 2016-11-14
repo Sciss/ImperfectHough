@@ -32,6 +32,8 @@ object Source {
 
   final case class GrayImage  (img: BufferedImage)
   final case class ThreshImage(img: BufferedImage)
+  final case class LinesIn    (arr: Array[LineI])
+  final case class LinesExt   (arr: Array[LineI])
 
   def live (): Props = Props(new SourceLive)
   def files(): Props = Props(new SourceFiles)
@@ -39,12 +41,14 @@ object Source {
     Props(new SourceIPCam(ip = ip, password = password, hAngleStep = hAngleStep, vAngle = vAngle))
 
 
-  final val CtlNone   = 0x00
-  final val CtlGray   = 0x01
-  final val CtlThresh = 0x02
+  final val CtlNone     = 0x00
+  final val CtlGray     = 0x01
+  final val CtlThresh   = 0x02
+  final val CtlLinesIn  = 0x04
+  final val CtlLinesExt = 0x08
 }
 abstract class SourceLike extends Actor {
-  import Source.{CtlGray, CtlNone, CtlThresh, GrayImage, ThreshImage}
+  import Source._
 
   protected final val toMat       = new OpenCVFrameConverter.ToMat
   protected final val toJava2D    = new Java2DFrameConverter
@@ -131,7 +135,7 @@ abstract class SourceLike extends Actor {
   final def analyze(frame: Frame): Array[LineI] = {
     val _gray     = convertToGray(frame)
     val bw        = convertToBlackAndWhite(_gray, bwThresh)
-    val numLines  = mkHough(_gray)
+    var numLines  = mkHough(_gray)
 
     if ((ctlFlags & CtlThresh) != 0) ctl.foreach { actor =>
       val frame   = toMat   .convert(blackWhite)
@@ -141,7 +145,40 @@ abstract class SourceLike extends Actor {
 
     val width    = bw.cols()
     val height   = bw.rows()
-    val numTriLn = analysis.run(lines, numLines0 = numLines, width = width, height = height, config = anaCfg)
+//    val numTriLn = analysis.run(lines, numLines0 = numLines, width = width, height = height, config = anaCfg)
+
+    if (anaCfg.filterSim) numLines = Analyze.removeSimilarLines(lines, numLines)
+
+    if ((ctlFlags & CtlLinesIn) != 0) ctl.foreach { actor =>
+      val arr = new Array[LineI](numLines)
+      var i = 0
+      while (i < arr.length) {
+        arr(i) = lines(i).immutable
+        i += 1
+      }
+      actor ! LinesIn(arr)
+    }
+
+    if (anaCfg.useExtend) {
+      analysis.extendLines(lines, numLines = numLines, width = width, height = height)
+    }
+
+    if ((ctlFlags & CtlLinesExt) != 0) ctl.foreach { actor =>
+      val arr = new Array[LineI](numLines)
+      var i = 0
+      while (i < arr.length) {
+        arr(i) = lines(i).immutable
+        i += 1
+      }
+      actor ! LinesExt(arr)
+    }
+
+    val numTriLn = if (anaCfg.useTri) {
+      analysis.calcIntersections(lines, numLines = numLines, minAngDeg = anaCfg.minAngDeg)
+      analysis.findTriangles2   (lines, numLines = numLines, minTriLen = anaCfg.minTriLen, width = width, height = height)
+    } else {
+      numLines
+    }
 
     //      var minX, minY, maxX, maxY = 0
     //      res.foreach { ln =>
