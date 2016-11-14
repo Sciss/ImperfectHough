@@ -36,7 +36,8 @@ object View {
                           breadCrumbs: Boolean = true,
                           cameraIP: String = "192.168.0.41", cameraPassword: String = "???",
                           useIPCam: Boolean = false, camHAngleStep: Double = 1.0, camVAngle: Double = 0.0,
-                          templateOut: Option[File] = None, writeFrames: Int = 0)
+                          templateOut: Option[File] = None, writeFrames: Int = 0,
+                          strokeWidth: Float = 2.5f)
 
   def main(args: Array[String]): Unit = {
     val p = new scopt.OptionParser[Config]("Imperfect-Hough") {
@@ -122,6 +123,7 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
   private[this] val antiAliasing  = config.antiAliasing
   private[this] val breadCrumbs   = config.breadCrumbs
   private[this] val writeOutput   = config.templateOut.isDefined
+  private[this] val strkLines     = new BasicStroke(config.strokeWidth)
 
   def run(): Unit = {
     import config._
@@ -334,7 +336,7 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
 //      g.scale(1.0, 540.0 / 1280)
 //      g.translate((frameIdx * 4) % 1920, 0)
       g.setColor(Color.white)
-      g.setStroke(new BasicStroke(2f))
+      g.setStroke(strkLines)
       if (antiAliasing) g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
 
       val inTime    = triPhase <= triNumFrames
@@ -349,12 +351,12 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
       val _triN = anaCurrent.triNext
 
       // automatically wraps around visible width.
-      // lines that "break" across the bounary are simply not drawn.
+      // lines that "break" across the boundary are simply not drawn.
       def drawLine(x1: Int, y1: Int, x2: Int, y2: Int): Unit = {
         val b   = x1 <= x2
         val x1m = IntFunctions.wrap(x1, 0, VisibleWidth)
         val x2m = IntFunctions.wrap(x2, 0, VisibleWidth)
-        val bm  = x1m < x2m
+        val bm  = x1m <= x2m
         if (b == bm) {
           g.drawLine(x1m, y1, x2m, y2)
         }
