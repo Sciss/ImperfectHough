@@ -15,6 +15,8 @@ package de.sciss.imperfect.hough
 
 import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 
+import scala.swing.Swing
+
 object MainLoop {
   def run(system: ActorSystem, config: View.Config): ActorRef = {
     val sourceP = if (config.useGrabber) Source.live()
@@ -45,7 +47,10 @@ class MainLoop(source: ActorRef) extends Actor {
 //      source ! Source.Close
 
     case Analysis(lines) =>
-      View.lines = lines
+      Swing.onEDT {
+        View.lines       = lines
+        View.linesFrame += 1
+      }
       source ! Source.Task
 
     case Stop =>

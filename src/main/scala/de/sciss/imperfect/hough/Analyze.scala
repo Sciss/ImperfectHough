@@ -227,7 +227,7 @@ object Analyze {
     }
   }
 
-  private[this] object LineX1Ordering extends Ordering[Line] {
+  object LineX1Ordering extends Ordering[Line] {
     def compare(a: Line, b: Line): Int = {
       val ax1 = a.x1
       val bx1 = b.x1
@@ -235,10 +235,10 @@ object Analyze {
     }
   }
 
-  private[this] val LineX1OrderingInv = LineX1Ordering.reverse
+//  final val LineX1OrderingInv: Ordering[Line] = LineX1Ordering.reverse
 
   def removeSimilarLines(lines: Array[Line], numIn: Int, dist: Int = 5): Int = {
-    util.Arrays.sort(lines, 0, numIn, LineX1OrderingInv)
+    util.Arrays.sort(lines, 0, numIn, LineX1Ordering)
     val distSq  = dist * dist
     var i       = 0
     var numOut  = 0

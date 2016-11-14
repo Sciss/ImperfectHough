@@ -26,7 +26,7 @@ object View {
                           listScreens: Boolean = false,
                           useGrabber: Boolean = false, antiAliasing: Boolean = true,
                           cameraIP: String = "192.168.0.41", cameraPassword: String = "???",
-                          useIPCam: Boolean = false, camHAngleStep: Double = 4.0, camVAngle: Double = 0.0)
+                          useIPCam: Boolean = false, camHAngleStep: Double = 1.0, camVAngle: Double = 0.0)
 
   def main(args: Array[String]): Unit = {
     val p = new scopt.OptionParser[Config]("Imperfect-RaspiPlayer") {
@@ -217,8 +217,10 @@ object View {
   private[this] var frameIdx      = 0
   private[this] var antiAliasing  = true
 
-  @volatile
+  // @volatile
   var lines = Array.empty[LineI]
+
+  var linesFrame = 0
 
   def paintOffScreen(): Unit = {
     val g = OffScreenG
@@ -241,7 +243,7 @@ object View {
 //      val sx = 1.0
       val sx = 540.0 / 1280 * (16.0/9) / (4.0/3)
       val sy = 540.0 / 1280
-      val tx = 100 // (frameIdx * 4) % 1920
+      val tx = (linesFrame * 6) % 1920
       val ty = 0
 //      g.scale(1.0, 540.0 / 1280)
 //      g.translate((frameIdx * 4) % 1920, 0)

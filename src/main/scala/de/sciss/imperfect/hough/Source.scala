@@ -107,14 +107,15 @@ abstract class SourceLike extends Actor {
   private[this] var bwThresh  = 127
   private[this] val minLines  = 640
   private[this] val maxLines  = 2560
-  private[this] val lines     = Array.fill (maxLines)(new Line(0, 0, 0, 0))
+  private[this] val lines1    = Array.fill (maxLines)(new Line(0, 0, 0, 0))
+  private[this] val lines2    = Array.fill (maxLines)(new Line(0, 0, 0, 0))
   private[this] val hough     = new Hough  (maxLines)
   private[this] val analysis  = new Analyze(maxLines)
 
   protected final val log     = Logging(context.system, this)
 
   @tailrec
-  private def mkHough(in: Mat): Int = {
+  private def mkHough(in: Mat, lines: Array[Line]): Int = {
     val bw        = convertToBlackAndWhite(in, bwThresh)
     val force     = bwThresh > 250
     val numLines  = hough.run(matIn = bw, lines = lines, force = force)
@@ -122,7 +123,7 @@ abstract class SourceLike extends Actor {
     if (tooHigh && !force) {
       bwThresh += 2
       log.info(s"inc bw thresh to $bwThresh")
-      mkHough(in)
+      mkHough(in, lines)
     } else {
       if (numLines < minLines && bwThresh > 10) {
         bwThresh -= 2
@@ -132,10 +133,14 @@ abstract class SourceLike extends Actor {
     }
   }
 
+  private[this] var flipFlop = false
+
   final def analyze(frame: Frame): Array[LineI] = {
     val _gray     = convertToGray(frame)
     val bw        = convertToBlackAndWhite(_gray, bwThresh)
-    var numLines  = mkHough(_gray)
+    val lines     = if (flipFlop) lines2 else lines1
+    flipFlop      = !flipFlop
+    var numLines  = mkHough(_gray, lines)
 
     if ((ctlFlags & CtlThresh) != 0) ctl.foreach { actor =>
       val frame   = toMat   .convert(blackWhite)
