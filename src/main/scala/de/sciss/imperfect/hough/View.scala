@@ -30,14 +30,32 @@ import de.sciss.numbers.IntFunctions
 import scala.swing.Swing
 
 object View {
-  final case class Config(verbose: Boolean = false, screenId: String = "", ctlScreenId: String = "",
-                          listScreens: Boolean = false,
-                          useGrabber: Boolean = false, antiAliasing: Boolean = true,
-                          breadCrumbs: Boolean = true,
-                          cameraIP: String = "192.168.0.41", cameraPassword: String = "???",
-                          useIPCam: Boolean = false, camHAngleStep: Double = 1.0, camVAngle: Double = 0.0,
-                          templateOut: Option[File] = None, writeFrames: Int = 0,
-                          strokeWidth: Float = 2.5f)
+  final case class Config(
+      verbose       : Boolean       = false,
+      screenId      : String        = "",
+      ctlScreenId   : String        = "",
+      listScreens   : Boolean       = false,
+      useGrabber    : Boolean       = false,
+      antiAliasing  : Boolean       = true,
+      breadCrumbs   : Boolean       = true,
+      breadLeft     : Int           = 1,
+      breadRight    : Int           = 64,
+      cameraIP      : String        = "192.168.0.41",
+      cameraPassword: String        = "???",
+      useIPCam      : Boolean       = false,
+      camHAngleStep : Double        = 1.0,
+      camVAngle     : Double        = 0.0,
+      templateOut   : Option[File]  = None,
+      writeFrames   : Int           = 0,
+      maxTriangles  : Int           = 2560 * 2,
+      triNumFrames  : Int           = 50,
+      strokeWidth   : Double        = 2.0,
+      aspect        : Double        = (16.0/9)/(4.0/3),
+      acceleration  : Double        = 0.005,
+      friction      : Double        = 0.93
+    )
+
+  private val default = Config()
 
   def main(args: Array[String]): Unit = {
     val p = new scopt.OptionParser[Config]("Imperfect-Hough") {
@@ -69,7 +87,7 @@ object View {
         .action   { (v, c) => c.copy(breadCrumbs = false) }
 
       opt[String] ("camera-ip")
-        .text ("IP address of the Amcrest IP camera")
+        .text (s"IP address of the Amcrest IP camera (default: ${default.cameraIP})")
         .action   { (v, c) => c.copy(cameraIP = v, useIPCam = true) }
 
       opt[String] ("camera-password")
@@ -77,11 +95,11 @@ object View {
         .action   { (v, c) => c.copy(cameraPassword = v, useIPCam = true) }
 
       opt[Double] ("h-angle-step")
-        .text ("Camera PTZ horizontal angle step (degrees; default: 4.0)")
+        .text (s"Camera PTZ horizontal angle step (degrees; default: ${default.camHAngleStep})")
         .action   { (v, c) => c.copy(camHAngleStep = v, useIPCam = true) }
 
       opt[Double] ("v-angle")
-        .text ("Camera PTZ vertical angle (degrees; default: 0.0)")
+        .text (s"Camera PTZ vertical angle (degrees; default: ${default.camVAngle})")
         .action   { (v, c) => c.copy(camVAngle = v, useIPCam = true) }
 
       opt[File]("output")
@@ -91,6 +109,38 @@ object View {
       opt[Int]("write-frames")
         .text ("Maximum number of frames to write as image files (default: 0 - no limit).")
         .action { (v, c) => c.copy(writeFrames = v) }
+
+      opt[Double] ("stroke")
+        .text (s"Stroke width (default: ${default.strokeWidth})")
+        .action   { (v, c) => c.copy(strokeWidth = v) }
+
+      opt[Double] ("aspect")
+        .text (s"Aspect (h/v) of triangle coordinates (default: ${default.aspect})")
+        .action   { (v, c) => c.copy(aspect = v) }
+
+      opt[Int] ("triangles")
+        .text (s"Maximum number of triangles (default: ${default.maxTriangles})")
+        .action   { (v, c) => c.copy(maxTriangles = v) }
+
+      opt[Int] ("step-frames")
+        .text (s"Frames between two analyses (default: ${default.triNumFrames})")
+        .action   { (v, c) => c.copy(triNumFrames = v) }
+
+      opt[Int] ("bread-left")
+        .text (s"Bread-crumbs left wipe (default: ${default.breadLeft})")
+        .action   { (v, c) => c.copy(breadLeft = v) }
+
+      opt[Int] ("bread-right")
+        .text (s"Bread-crumbs right wipe (default: ${default.breadRight})")
+        .action   { (v, c) => c.copy(breadRight = v) }
+
+      opt[Double] ("acceleration")
+        .text (s"Acceleration coefficient (default: ${default.acceleration})")
+        .action   { (v, c) => c.copy(acceleration = v) }
+
+      opt[Double] ("friction")
+        .text (s"Friction coefficient (default: ${default.friction})")
+        .action   { (v, c) => c.copy(friction = v) }
     }
     p.parse(args, Config()).fold(sys.exit(1)) { config =>
       if (config.listScreens) {
@@ -120,10 +170,10 @@ object View {
   }
 }
 final class View(system: ActorSystem, config: Config, source: ActorRef, loop: ActorRef) {
-  private[this] val antiAliasing  = config.antiAliasing
-  private[this] val breadCrumbs   = config.breadCrumbs
   private[this] val writeOutput   = config.templateOut.isDefined
-  private[this] val strkLines     = new BasicStroke(config.strokeWidth)
+  private[this] val strkLines     = new BasicStroke(config.strokeWidth.toFloat)
+
+  import config.{triNumFrames, breadLeft, antiAliasing}
 
   def run(): Unit = {
     import config._
@@ -263,20 +313,16 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
   private[this] var animate       = true
   private[this] var frameIdx      = 0
 
-  private[this] val triNumFrames  = 40
-
   def update(a: Analysis): Unit = {
     Swing.onEDT {
       if (triPhase >= triNumFrames) {
         if (anaPending == null) {
-          anaCurrent = a
+          setCurrentAnalysis(a)
           loop ! Source.Task
         } else {
-          anaCurrent = anaPending
+          setCurrentAnalysis(anaPending)
           anaPending = a
         }
-        triPhase = 0
-        // analysisFrames += 1
       } else {
         if (anaPending != null) warn("Pending analysis overflow!")
         anaPending = a
@@ -284,34 +330,88 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
     }
   }
 
+  private def setCurrentAnalysis(a: Analysis): Unit = {
+    anaCurrent      = a
+    triPhase        = 0
+    analysisFrames += 1
+    val isEven      = analysisFrames % 2 == 0
+
+    val _triPI  = a.triPrev
+    val _triN   = a.triNext
+    val _triP   = trianglePrev
+    val _veloP  = if (isEven) velocities1 else velocities2
+    val _veloN  = if (isEven) velocities2 else velocities1
+    var i = 0
+    var j = 0
+    while (i < _triPI.length) {
+      val triI = _triPI(i)
+      if (triI.isIncoherent) {
+        val tri = _triP (j)
+        val vp  = _veloP(i)
+        tri.x1  = vp.x1.toInt
+        tri.y1  = vp.y1.toInt
+        tri.x2  = vp.x2.toInt
+        tri.y2  = vp.y2.toInt
+        tri.x3  = vp.x3.toInt
+        tri.y3  = vp.y3.toInt
+        j += 1
+      }
+      i += 1
+    }
+    numTriPrev = j
+
+    val _perm = Coherence.permutations
+    i = 0
+    while (i < _triN.length) {
+      val tri = _triN(i)
+      val vn  = _veloN(i)
+      if (tri.isCoherent) {
+        val perm = _perm(tri.prevPerm)
+        vn.copyFromPerm(_veloP(tri.prevIndex), perm)
+      } else {
+        vn.copyFrom(tri)
+      }
+      i += 1
+    }
+  }
+
   private[this] var anaPending: Analysis = _
   private[this] var anaCurrent: Analysis = Analysis(Array.empty, Array.empty)
+  private[this] val trianglePrev = Array.fill(config.maxTriangles)(new Triangle(0, 0, 0, 0, 0, 0, 0))
+  private[this] var numTriPrev   = 0
+  private[this] val velocities1  = Array.fill(config.maxTriangles)(new Velocities(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+  private[this] val velocities2  = Array.fill(config.maxTriangles)(new Velocities(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
   private[this] var triPhase  = triNumFrames
+  private[this] val breadLeftRight  = config.breadLeft + config.breadRight
 
-//  private[this] var analysisFrames = 0
+  private[this] var analysisFrames = 0
 
-  private[this] val line = new Line(0, 0, 0, 0)
+  private[this] val line      = new Line(0, 0, 0, 0)
 
   private[this] val atanMul1  = 4.0
   private[this] val atanAdd1  = -atanMul1/2
   private[this] val atanAdd2  = math.atan(atanMul1/2)
   private[this] val atanMul2  = 1.0 / (2 * atanAdd2)
 
+  private[this] val sx = 0.5 * config.aspect
+  private[this] val sy = 0.5
+
   def paintOffScreen(): Unit = {
-    val g = OffScreenG
-    val sx = 540.0 / 1280 * (16.0/9) / (4.0/3)
-    val sy = 540.0 / 1280
+    val g   = OffScreenG
+    val _sx = sx
+    val _sy = sy
     //      val tx = (analysisFrames * 6) % 1920
     //      val tx = (frameIdx % (1920 * 4)) * 0.25
     //      val tx = frameIdx * 0.25
     val tx = (frameIdx % (VisibleWidth * 4)) * 0.25
 
     g.setColor(Color.black)
-    if (breadCrumbs) {
-      val x1 = tx.toInt
-      val w1 = math.min(NominalWidth, VisibleWidth - x1)
+    if (config.breadCrumbs) {
+      val x1 = tx.toInt - breadLeft
+      val w0 = ((NominalWidth + breadLeftRight) * sx).toInt
+      val w1 = math.min(w0, VisibleWidth - x1)
       g.fillRect(x1, 0, w1, VisibleHeight)
-      val w2 = NominalWidth - w1
+      val w2 = w0 - w1
       if (w2 > 0) g.fillRect(0, 0, w2, VisibleHeight)
 
     } else {
@@ -346,9 +446,12 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
 //      println(fadeIn)
       val fadeOut   = 1.0 - fadeIn
 
-      val _ln   = line
-      val _triP = anaCurrent.triPrev
-      val _triN = anaCurrent.triNext
+      val _ln     = line
+      val _triP   = trianglePrev
+      val _triPSz = numTriPrev
+      val _triN   = anaCurrent.triNext
+      val isEven  = analysisFrames % 2 == 0
+      val _velo   = if (isEven) velocities2 else velocities1
 
       // automatically wraps around visible width.
       // lines that "break" across the boundary are simply not drawn.
@@ -362,95 +465,115 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
         }
       }
 
+      val accel = config.acceleration.toFloat
+      val fric  = config.friction    .toFloat
+
       var i = 0
-      if (inTime) while (i < _triP.length) {
+      if (inTime) while (i < _triPSz) {
         val tri = _triP(i)
-        if (tri.isIncoherent) {
-          _ln.x1 = tri.x1
-          _ln.y1 = tri.y1
-          _ln.x2 = tri.x2
-          _ln.y2 = tri.y2
-          Analyze.resizeLine(_ln, _ln, width = 1920, height = 1080, factor = fadeOut)
-          val x11 = (_ln.x1 * sx + tx).toInt
-          val y11 = (_ln.y1 * sy + ty).toInt
-          val x21 = (_ln.x2 * sx + tx).toInt
-          val y21 = (_ln.y2 * sy + ty).toInt
-          drawLine(x11, y11, x21, y21)
+        
+        _ln.x1 = tri.x1
+        _ln.y1 = tri.y1
+        _ln.x2 = tri.x2
+        _ln.y2 = tri.y2
+        Analyze.resizeLine(_ln, _ln, width = NominalWidth, height = NominalHeight, factor = fadeOut)
+        val x11 = (_ln.x1 * _sx + tx).toInt
+        val y11 = (_ln.y1 * _sy + ty).toInt
+        val x21 = (_ln.x2 * _sx + tx).toInt
+        val y21 = (_ln.y2 * _sy + ty).toInt
+        drawLine(x11, y11, x21, y21)
 
-          _ln.x1 = tri.x2
-          _ln.y1 = tri.y2
-          _ln.x2 = tri.x3
-          _ln.y2 = tri.y3
-          Analyze.resizeLine(_ln, _ln, width = 1920, height = 1080, factor = fadeOut)
-          val x12 = (_ln.x1 * sx + tx).toInt
-          val y12 = (_ln.y1 * sy + ty).toInt
-          val x22 = (_ln.x2 * sx + tx).toInt
-          val y22 = (_ln.y2 * sy + ty).toInt
-          drawLine(x12, y12, x22, y22)
+        _ln.x1 = tri.x2
+        _ln.y1 = tri.y2
+        _ln.x2 = tri.x3
+        _ln.y2 = tri.y3
+        Analyze.resizeLine(_ln, _ln, width = NominalWidth, height = NominalHeight, factor = fadeOut)
+        val x12 = (_ln.x1 * _sx + tx).toInt
+        val y12 = (_ln.y1 * _sy + ty).toInt
+        val x22 = (_ln.x2 * _sx + tx).toInt
+        val y22 = (_ln.y2 * _sy + ty).toInt
+        drawLine(x12, y12, x22, y22)
 
-          _ln.x1 = tri.x3
-          _ln.y1 = tri.y3
-          _ln.x2 = tri.x1
-          _ln.y2 = tri.y1
-          Analyze.resizeLine(_ln, _ln, width = 1920, height = 1080, factor = fadeOut)
-          val x13 = (_ln.x1 * sx + tx).toInt
-          val y13 = (_ln.y1 * sy + ty).toInt
-          val x23 = (_ln.x2 * sx + tx).toInt
-          val y23 = (_ln.y2 * sy + ty).toInt
-          drawLine(x13, y13, x23, y23)
-        }
+        _ln.x1 = tri.x3
+        _ln.y1 = tri.y3
+        _ln.x2 = tri.x1
+        _ln.y2 = tri.y1
+        Analyze.resizeLine(_ln, _ln, width = NominalWidth, height = NominalHeight, factor = fadeOut)
+        val x13 = (_ln.x1 * _sx + tx).toInt
+        val y13 = (_ln.y1 * _sy + ty).toInt
+        val x23 = (_ln.x2 * _sx + tx).toInt
+        val y23 = (_ln.y2 * _sy + ty).toInt
+        drawLine(x13, y13, x23, y23)
+
         i += 1
       }
 
-      val _perm = Coherence.permutations
       i = 0
       while (i < _triN.length) {
         val tri = _triN(i)
+        val v   = _velo(i)
         if (tri.isIncoherent) {
-          _ln.x1 = tri.x1
-          _ln.y1 = tri.y1
-          _ln.x2 = tri.x2
-          _ln.y2 = tri.y2
-          Analyze.resizeLine(_ln, _ln, width = 1920, height = 1080, factor = fadeIn)
-          val x11 = (_ln.x1 * sx + tx).toInt
-          val y11 = (_ln.y1 * sy + ty).toInt
-          val x21 = (_ln.x2 * sx + tx).toInt
-          val y21 = (_ln.y2 * sy + ty).toInt
+          _ln.x1 = v.x1.toInt
+          _ln.y1 = v.y1.toInt
+          _ln.x2 = v.x2.toInt
+          _ln.y2 = v.y2.toInt
+          Analyze.resizeLine(_ln, _ln, width = NominalWidth, height = NominalHeight, factor = fadeIn)
+          val x11 = (_ln.x1 * _sx + tx).toInt
+          val y11 = (_ln.y1 * _sy + ty).toInt
+          val x21 = (_ln.x2 * _sx + tx).toInt
+          val y21 = (_ln.y2 * _sy + ty).toInt
           drawLine(x11, y11, x21, y21)
 
-          _ln.x1 = tri.x2
-          _ln.y1 = tri.y2
-          _ln.x2 = tri.x3
-          _ln.y2 = tri.y3
-          Analyze.resizeLine(_ln, _ln, width = 1920, height = 1080, factor = fadeIn)
-          val x12 = (_ln.x1 * sx + tx).toInt
-          val y12 = (_ln.y1 * sy + ty).toInt
-          val x22 = (_ln.x2 * sx + tx).toInt
-          val y22 = (_ln.y2 * sy + ty).toInt
+          _ln.x1 = v.x2.toInt
+          _ln.y1 = v.y2.toInt
+          _ln.x2 = v.x3.toInt
+          _ln.y2 = v.y3.toInt
+          Analyze.resizeLine(_ln, _ln, width = NominalWidth, height = NominalHeight, factor = fadeIn)
+          val x12 = (_ln.x1 * _sx + tx).toInt
+          val y12 = (_ln.y1 * _sy + ty).toInt
+          val x22 = (_ln.x2 * _sx + tx).toInt
+          val y22 = (_ln.y2 * _sy + ty).toInt
           drawLine(x12, y12, x22, y22)
 
-          _ln.x1 = tri.x3
-          _ln.y1 = tri.y3
-          _ln.x2 = tri.x1
-          _ln.y2 = tri.y1
-          Analyze.resizeLine(_ln, _ln, width = 1920, height = 1080, factor = fadeIn)
-          val x13 = (_ln.x1 * sx + tx).toInt
-          val y13 = (_ln.y1 * sy + ty).toInt
-          val x23 = (_ln.x2 * sx + tx).toInt
-          val y23 = (_ln.y2 * sy + ty).toInt
+          _ln.x1 = v.x3.toInt
+          _ln.y1 = v.y3.toInt
+          _ln.x2 = v.x1.toInt
+          _ln.y2 = v.y1.toInt
+          Analyze.resizeLine(_ln, _ln, width = NominalWidth, height = NominalHeight, factor = fadeIn)
+          val x13 = (_ln.x1 * _sx + tx).toInt
+          val y13 = (_ln.y1 * _sy + ty).toInt
+          val x23 = (_ln.x2 * _sx + tx).toInt
+          val y23 = (_ln.y2 * _sy + ty).toInt
           drawLine(x13, y13, x23, y23)
 
         } else {
-          val triN = tri
-          val triP = _triP(tri.prevIndex)
-          val perm = _perm(tri.prevPerm)
+//          val f    = 0.01f
+//          val r    = 0.98f
+          val ax1  = (tri.x1 - v.x1) * accel
+          v.vx1    = (v.vx1 + ax1) * fric
+          v.x1    += v.vx1
+          val ay1  = (tri.y1 - v.y1) * accel
+          v.vy1    = (v.vy1 + ay1) * fric
+          v.y1    += v.vy1
+          val ax2  = (tri.x2 - v.x2) * accel
+          v.vx2    = (v.vx2 + ax2) * fric
+          v.x2    += v.vx2
+          val ay2  = (tri.y2 - v.y2) * accel
+          v.vy2    = (v.vy2 + ay2) * fric
+          v.y2    += v.vy2
+          val ax3  = (tri.x3 - v.x3) * accel
+          v.vx3    = (v.vx3 + ax3) * fric
+          v.x3    += v.vx3
+          val ay3  = (tri.y3 - v.y3) * accel
+          v.vy3    = (v.vy3 + ay3) * fric
+          v.y3    += v.vy3
 
-          val x1   = ((triN.x1 * fadeIn + triP.x(perm._1) * fadeOut) * sx + tx).toInt
-          val y1   = ((triN.y1 * fadeIn + triP.y(perm._1) * fadeOut) * sy + ty).toInt
-          val x2   = ((triN.x2 * fadeIn + triP.x(perm._2) * fadeOut) * sx + tx).toInt
-          val y2   = ((triN.y2 * fadeIn + triP.y(perm._2) * fadeOut) * sy + ty).toInt
-          val x3   = ((triN.x3 * fadeIn + triP.x(perm._3) * fadeOut) * sx + tx).toInt
-          val y3   = ((triN.y3 * fadeIn + triP.y(perm._3) * fadeOut) * sy + ty).toInt
+          val x1   = (v.x1 * _sx + tx).toInt
+          val y1   = (v.y1 * _sy + ty).toInt
+          val x2   = (v.x2 * _sx + tx).toInt
+          val y2   = (v.y2 * _sy + ty).toInt
+          val x3   = (v.x3 * _sx + tx).toInt
+          val y3   = (v.y3 * _sy + ty).toInt
           drawLine(x1, y1, x2, y2)
           drawLine(x2, y2, x3, y3)
           drawLine(x3, y3, x1, y1)
@@ -460,8 +583,7 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
 
       triPhase += 1
       if (triPhase >= triNumFrames && anaPending != null) {
-        triPhase    = 0
-        anaCurrent  = anaPending
+        setCurrentAnalysis(anaPending)
         anaPending  = null
         loop ! Source.Task
       }

@@ -30,6 +30,13 @@ final class Triangle(var x1: Int, var y1: Int, var x2: Int, var y2: Int, var x3:
     case _ => throw new IllegalArgumentException(idx.toString)
   }
 
+  def x_=(idx: Int, value: Int): Unit = (idx: @switch) match {
+    case 0 => x1 = value
+    case 1 => x2 = value
+    case 2 => x3 = value
+    case _ => throw new IllegalArgumentException(idx.toString)
+  }
+
   def y(idx: Int): Int = (idx: @switch) match {
     case 0 => y1
     case 1 => y2
@@ -37,7 +44,16 @@ final class Triangle(var x1: Int, var y1: Int, var x2: Int, var y2: Int, var x3:
     case _ => throw new IllegalArgumentException(idx.toString)
   }
 
+  def y_=(idx: Int, value: Int): Unit = (idx: @switch) match {
+    case 0 => y1 = value
+    case 1 => y2 = value
+    case 2 => y3 = value
+    case _ => throw new IllegalArgumentException(idx.toString)
+  }
+
   def immutable: TriangleI = new TriangleI(x1 = x1, y1 = y1, x2 = x2, y2 = y2, x3 = x3, y3 = y3, coh = coh)
+
+  def copy: Triangle = new Triangle(x1 = x1, y1 = y1, x2 = x2, y2 = y2, x3 = x3, y3 = y3, coh = coh)
 
   override def toString: String = s"Triangle(p1 = ($x1, $y1), p2 = ($x2, $y2), p3 = ($x3, $y3), coh = $coh)"
 }
