@@ -6,3 +6,5 @@ project/boot/
 .idea_modules/
 dependency-graph.sbt
 wiki/
+/run.sh
+/rtsp.txt

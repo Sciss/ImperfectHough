@@ -52,7 +52,8 @@ object View {
       strokeWidth   : Double        = 2.0,
       aspect        : Double        = (16.0/9)/(4.0/3),
       acceleration  : Double        = 0.005,
-      friction      : Double        = 0.93
+      friction      : Double        = 0.93,
+      canvasSpeed   : Int           = 4
     )
 
   private val default = Config()
@@ -141,6 +142,10 @@ object View {
       opt[Double] ("friction")
         .text (s"Friction coefficient (default: ${default.friction})")
         .action   { (v, c) => c.copy(friction = v) }
+
+      opt[Int] ("canvas-speed")
+        .text (s"Canvas speed -- higher is slower (default: ${default.canvasSpeed})")
+        .action   { (v, c) => c.copy(canvasSpeed = v) }
     }
     p.parse(args, Config()).fold(sys.exit(1)) { config =>
       if (config.listScreens) {
@@ -396,6 +401,8 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
   private[this] val sx = 0.5 * config.aspect
   private[this] val sy = 0.5
 
+  private[this] val cvRecip = 1.0 / config.canvasSpeed
+
   def paintOffScreen(): Unit = {
     val g   = OffScreenG
     val _sx = sx
@@ -403,7 +410,7 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
     //      val tx = (analysisFrames * 6) % 1920
     //      val tx = (frameIdx % (1920 * 4)) * 0.25
     //      val tx = frameIdx * 0.25
-    val tx = (frameIdx % (VisibleWidth * 4)) * 0.25
+    val tx = (frameIdx % (VisibleWidth * config.canvasSpeed)) * cvRecip
 
     g.setColor(Color.black)
     if (config.breadCrumbs) {
