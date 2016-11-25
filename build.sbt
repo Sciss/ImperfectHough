@@ -13,6 +13,7 @@ libraryDependencies ++= Seq(
   "de.sciss"          %% "swingplus"  % "0.2.1",
   "de.sciss"          %% "numbers"    % "0.1.1",
   "de.sciss"          %% "kollflitz"  % "0.2.0",
+  "de.sciss"          %% "scalaosc"   % "1.1.5",
   "com.github.scopt"  %% "scopt"      % "3.5.0",
   "com.typesafe.akka" %% "akka-actor" % "2.4.12"
 )

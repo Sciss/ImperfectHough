@@ -53,7 +53,12 @@ object View {
       aspect        : Double        = (16.0/9)/(4.0/3),
       acceleration  : Double        = 0.005,
       friction      : Double        = 0.93,
-      canvasSpeed   : Int           = 4
+      canvasSpeed   : Int           = 4,
+      rattleIP      : String        = "192.168.0.21",
+      rattlePort    : Int           = 7771,
+      rattlePad     : Int           = 64,
+      rattleDump    : Boolean       = false,
+      useRattle     : Boolean       = false
     )
 
   private val default = Config()
@@ -94,6 +99,22 @@ object View {
       opt[String] ("camera-password")
         .text ("Password of the Amcrest IP camera (no default - must be provided if not using grabber)")
         .action   { (v, c) => c.copy(cameraPassword = v, useIPCam = true) }
+
+      opt[String] ("rattle-ip")
+        .text (s"IP address of the rattle computer (default: ${default.rattleIP})")
+        .action   { (v, c) => c.copy(rattleIP = v, useRattle = true) }
+
+      opt[Int] ("rattle-port")
+        .text (s"OSC port of the rattle computer (default: ${default.rattlePort})")
+        .action   { (v, c) => c.copy(rattlePort = v, useRattle = true) }
+
+      opt[Int] ("rattle-pad")
+        .text (s"Rattle space padding (default: ${default.rattlePad})")
+        .action   { (v, c) => c.copy(rattlePad = v, useRattle = true) }
+
+      opt[Unit] ("rattle-dump")
+        .text (s"Dump outgoing rattle messages (default: ${default.rattleDump})")
+        .action   { (v, c) => c.copy(rattleDump = true, useRattle = true) }
 
       opt[Double] ("h-angle-step")
         .text (s"Camera PTZ horizontal angle step (degrees; default: ${default.camHAngleStep})")
@@ -155,10 +176,11 @@ object View {
 
       val system      = ActorSystem("system")
       val source      = Source  (system, config)
+      val rattleOpt   = if (config.useRattle) Some(SpaceCommunicator(system, config)) else None
       val loop        = MainLoop(system, source = source, config = config)
       EventQueue.invokeLater(new Runnable {
         def run(): Unit = {
-          val view = new View(system, config, source = source, loop = loop)
+          val view = new View(system, config, source = source, loop = loop, rattleOpt = rattleOpt)
           view.run()
         }
       })
@@ -174,7 +196,7 @@ object View {
     out.println(s)
   }
 }
-final class View(system: ActorSystem, config: Config, source: ActorRef, loop: ActorRef) {
+final class View(system: ActorSystem, config: Config, source: ActorRef, loop: ActorRef, rattleOpt: Option[ActorRef]) {
   private[this] val writeOutput   = config.templateOut.isDefined
   private[this] val strkLines     = new BasicStroke(config.strokeWidth.toFloat)
 
@@ -403,6 +425,9 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
 
   private[this] val cvRecip = 1.0 / config.canvasSpeed
 
+
+  private[this] val rattle = rattleOpt.orNull
+
   def paintOffScreen(): Unit = {
     val g   = OffScreenG
     val _sx = sx
@@ -410,15 +435,16 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
     //      val tx = (analysisFrames * 6) % 1920
     //      val tx = (frameIdx % (1920 * 4)) * 0.25
     //      val tx = frameIdx * 0.25
-    val tx = (frameIdx % (VisibleWidth * config.canvasSpeed)) * cvRecip
+    val tx  = (frameIdx % (VisibleWidth * config.canvasSpeed)) * cvRecip
+    val bx1 = tx.toInt - breadLeft
+    val bw0 = ((NominalWidth + breadLeftRight) * sx).toInt
+    if (rattle != null) rattle ! SpaceCommunicator.Position(bx1, bx1 + bw0)
 
     g.setColor(Color.black)
     if (config.breadCrumbs) {
-      val x1 = tx.toInt - breadLeft
-      val w0 = ((NominalWidth + breadLeftRight) * sx).toInt
-      val w1 = math.min(w0, VisibleWidth - x1)
-      g.fillRect(x1, 0, w1, VisibleHeight)
-      val w2 = w0 - w1
+      val w1 = math.min(bw0, VisibleWidth - bx1)
+      g.fillRect(bx1, 0, w1, VisibleHeight)
+      val w2 = bw0 - w1
       if (w2 > 0) g.fillRect(0, 0, w2, VisibleHeight)
 
     } else {
