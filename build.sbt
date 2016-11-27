@@ -1,5 +1,5 @@
 name         := "ImperfectHough"
-version      := "0.1.2-SNAPSHOT"
+version      := "0.1.2"
 description  := "An algorithmic art project (video installation)"
 organization := "de.sciss"
 homepage     := Some(url(s"https://github.com/Sciss/${name.value}"))
@@ -17,3 +17,7 @@ libraryDependencies ++= Seq(
   "com.github.scopt"  %% "scopt"      % "3.5.0",
   "com.typesafe.akka" %% "akka-actor" % "2.4.12"
 )
+
+mainClass in assembly := Some("de.sciss.imperfect.hough.View")
+assemblyJarName in assembly := s"${name.value}.jar"
+target in assembly := baseDirectory.value
