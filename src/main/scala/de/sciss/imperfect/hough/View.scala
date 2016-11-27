@@ -21,6 +21,7 @@ import javax.imageio.ImageIO
 import javax.swing.Timer
 
 import akka.actor.{ActorRef, ActorSystem}
+import akka.event.Logging
 import de.sciss.file._
 import de.sciss.imperfect.hough.MainLoop.Start
 import de.sciss.imperfect.hough.Source.Analysis
@@ -60,7 +61,8 @@ object View {
       rattlePort    : Int           = 7771,
       rattlePad     : Int           = 64,
       rattleDump    : Boolean       = false,
-      useRattle     : Boolean       = false
+      useRattle     : Boolean       = false,
+      logging       : Boolean       = false
     )
 
   private val default = Config()
@@ -173,6 +175,10 @@ object View {
       opt[Int] ("wipe-speed")
         .text (s"wipe speed -- higher is slower (default: ${default.wipeSpeed})")
         .action   { (v, c) => c.copy(wipeSpeed = v) }
+
+      opt[Unit] ("log")
+        .text ("Enable debug logging")
+        .action   { (v, c) => c.copy(logging = true) }
     }
     p.parse(args, Config()).fold(sys.exit(1)) { config =>
       if (config.listScreens) {
@@ -181,6 +187,7 @@ object View {
       }
 
       val system      = ActorSystem("system")
+      if (!config.logging) system.eventStream.setLogLevel(Logging.WarningLevel)
       val source      = Source  (system, config)
       val rattleOpt   = if (config.useRattle) Some(SpaceCommunicator(system, config)) else None
       val loop        = MainLoop(system, source = source, config = config)
@@ -453,7 +460,7 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
     algoStage     = 0
     rattleRectX0  = 0f
     rattleRectX1  = 0f
-    triRectX0     = 0f + config.rattlePad
+    triRectX0     = 0f // + config.rattlePad
     triRectX1     = 0f - config.rattlePad
   }
 
@@ -708,7 +715,8 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
         if (triRectX1 >= VisibleWidth) algoStage += 1
 
       case 2 =>
-        triRectX0    += wvRecip
+//        triRectX0    += wvRecip
+        triRectX0    += cvRecip
         if (triRectX0 >= triRectX1) algoStage += 1
 
       case 3 =>
@@ -729,8 +737,8 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
 
         if (rattleRectX0 >= rattleRectX1) {
           val STAT_TOT = (STAT_DP_SPACE + STAT_HH_SPACE).toDouble
-          println(f"DP space = ${STAT_DP_SPACE} or ${STAT_DP_SPACE / STAT_TOT * 100}%1.1f")
-          println(f"HH space = ${STAT_HH_SPACE} or ${STAT_HH_SPACE / STAT_TOT * 100}%1.1f")
+          println(f"DP space = $STAT_DP_SPACE or ${STAT_DP_SPACE / STAT_TOT * 100}%1.1f")
+          println(f"HH space = $STAT_HH_SPACE or ${STAT_HH_SPACE / STAT_TOT * 100}%1.1f")
           resetStage()
         }
     }
