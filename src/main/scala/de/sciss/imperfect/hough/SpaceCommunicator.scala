@@ -27,7 +27,7 @@ object SpaceCommunicator {
     if (config.rattleDump) t.dump()
     t.connect()
     log("rattle OSC set-up.")
-    val spaceP  = Props(new SpaceCommunicator(t, pad = config.rattlePad))
+    val spaceP  = Props(new SpaceCommunicator(t, pad = 0 /* config.rattlePad */))
     val space   = system.actorOf(spaceP, "osc")
     space
   }

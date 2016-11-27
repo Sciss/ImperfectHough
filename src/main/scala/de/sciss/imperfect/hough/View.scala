@@ -15,7 +15,7 @@ package de.sciss.imperfect.hough
 
 import java.awt.event.{ActionEvent, ActionListener, KeyAdapter, KeyEvent, MouseAdapter, MouseEvent}
 import java.awt.image.BufferedImage
-import java.awt.{BasicStroke, Color, EventQueue, Font, Frame, GraphicsDevice, GraphicsEnvironment, Point, RenderingHints}
+import java.awt.{BasicStroke, Color, EventQueue, Frame, GraphicsDevice, GraphicsEnvironment, Point, RenderingHints}
 import java.io.PrintStream
 import javax.imageio.ImageIO
 import javax.swing.Timer
@@ -27,6 +27,7 @@ import de.sciss.imperfect.hough.Source.Analysis
 import de.sciss.imperfect.hough.View.Config
 import de.sciss.numbers.IntFunctions
 
+import scala.annotation.switch
 import scala.swing.Swing
 
 object View {
@@ -39,7 +40,7 @@ object View {
       antiAliasing  : Boolean       = true,
       breadCrumbs   : Boolean       = true,
       breadLeft     : Int           = 1,
-      breadRight    : Int           = 64,
+      breadRight    : Int           = 0,
       cameraIP      : String        = "192.168.0.41",
       cameraPassword: String        = "???",
       useIPCam      : Boolean       = false,
@@ -54,6 +55,7 @@ object View {
       acceleration  : Double        = 0.005,
       friction      : Double        = 0.93,
       canvasSpeed   : Int           = 4,
+      wipeSpeed     : Int           = 4,
       rattleIP      : String        = "192.168.0.21",
       rattlePort    : Int           = 7771,
       rattlePad     : Int           = 64,
@@ -167,6 +169,10 @@ object View {
       opt[Int] ("canvas-speed")
         .text (s"Canvas speed -- higher is slower (default: ${default.canvasSpeed})")
         .action   { (v, c) => c.copy(canvasSpeed = v) }
+
+      opt[Int] ("wipe-speed")
+        .text (s"wipe speed -- higher is slower (default: ${default.wipeSpeed})")
+        .action   { (v, c) => c.copy(wipeSpeed = v) }
     }
     p.parse(args, Config()).fold(sys.exit(1)) { config =>
       if (config.listScreens) {
@@ -200,7 +206,7 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
   private[this] val writeOutput   = config.templateOut.isDefined
   private[this] val strkLines     = new BasicStroke(config.strokeWidth.toFloat)
 
-  import config.{triNumFrames, breadLeft, antiAliasing}
+  import config.{antiAliasing, breadLeft, breadRight, triNumFrames}
 
   def run(): Unit = {
     import config._
@@ -334,7 +340,7 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
     loop ! Start(this)
   }
 
-  private[this] val fntTest       = new Font(Font.SANS_SERIF, Font.BOLD, 500)
+//  private[this] val fntTest       = new Font(Font.SANS_SERIF, Font.BOLD, 500)
   private[this] var drawRect      = false
   private[this] var drawText      = false
   private[this] var animate       = true
@@ -423,10 +429,38 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
   private[this] val sx = 0.5 * config.aspect
   private[this] val sy = 0.5
 
-  private[this] val cvRecip = 1.0 / config.canvasSpeed
-
+  private[this] val cvRecip = 1.0f / config.canvasSpeed
+  private[this] val wvRecip = 1.0f / config.wipeSpeed
 
   private[this] val rattle = rattleOpt.orNull
+
+  // 0 - open black (rattle) rectangle, do not pan
+  // 1 - expand black rectangle and pan at the same time
+  // 2 - halt black rectangle and keep panning
+  // 3 - shrink black rectangle / erase traces
+  // then repeat
+  private[this] var algoStage: Int = _
+
+  private[this] val bw0           = ((NominalWidth + breadLeftRight) * sx).toInt
+  private[this] val fullTriWidth  = NominalWidth * sx
+
+  private[this] var rattleRectX0: Float = _
+  private[this] var rattleRectX1: Float = _
+  private[this] var triRectX0   : Float = _
+  private[this] var triRectX1   : Float = _
+
+  def resetStage(): Unit = {
+    algoStage     = 0
+    rattleRectX0  = 0f
+    rattleRectX1  = 0f
+    triRectX0     = 0f + config.rattlePad
+    triRectX1     = 0f - config.rattlePad
+  }
+
+  resetStage()
+
+  private[this] var STAT_DP_SPACE = 0L
+  private[this] var STAT_HH_SPACE = 0L
 
   def paintOffScreen(): Unit = {
     val g   = OffScreenG
@@ -435,22 +469,44 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
     //      val tx = (analysisFrames * 6) % 1920
     //      val tx = (frameIdx % (1920 * 4)) * 0.25
     //      val tx = frameIdx * 0.25
-    val tx  = (frameIdx % (VisibleWidth * config.canvasSpeed)) * cvRecip
-    val bx1 = tx.toInt - breadLeft
-    val bw0 = ((NominalWidth + breadLeftRight) * sx).toInt
-    if (rattle != null) rattle ! SpaceCommunicator.Position(bx1, bx1 + bw0)
+    // val tx  = (frameIdx % (VisibleWidth * config.canvasSpeed)) * cvRecip
+    val tx0 = triRectX0
+    val tx1 = triRectX1
+    val tx2 = tx0 - config.rattlePad
+    val bx1 = tx0.toInt - breadLeft
+    val bx2 = tx1.toInt + breadRight
+
+    val rx0 = rattleRectX0.toInt
+    val rx1 = rattleRectX1.toInt
+
+    if (rattle != null) {
+      rattle ! SpaceCommunicator.Position(rx0, rx1)
+    }
+
+//    {
+//      g.setColor(Color.red)
+//      val foo0 = IntFunctions.wrap(rattleRectX0.toInt, 0, VisibleWidth)
+//      val foo1 = IntFunctions.wrap(rattleRectX1.toInt, 0, VisibleWidth)
+//      if (foo0 <= foo1) {
+//        g.fillRect(foo0, 0, foo1 - foo0, VisibleHeight)
+//      } else {
+//        g.fillRect(foo0, 0, VisibleWidth - foo0, VisibleHeight)
+//        g.fillRect(0, 0, foo1, VisibleHeight)
+//      }
+//    }
 
     g.setColor(Color.black)
     if (config.breadCrumbs) {
       val w1 = math.min(bw0, VisibleWidth - bx1)
       g.fillRect(bx1, 0, w1, VisibleHeight)
-      val w2 = bw0 - w1
-      if (w2 > 0) g.fillRect(0, 0, w2, VisibleHeight)
+      // val w2 = bw0 - w1
+      // if (w2 > 0) g.fillRect(0, 0, w2, VisibleHeight)
 
     } else {
       g.fillRect(0, 0, VisibleWidth, VisibleHeight)
     }
 
+    /*
     if (drawText) {
       val atOrig = g.getTransform
       val rot = frameIdx * Math.PI / 180
@@ -461,34 +517,29 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
       g.drawString("Imperfect Reconstruction", 20, fm.getAscent + 20)
       g.setTransform(atOrig)
     }
+    */
 
-    {
-//      val atOrig = g.getTransform
-//      val sx = 1.0
-      val ty = 0
-//      g.scale(1.0, 540.0 / 1280)
-//      g.translate((frameIdx * 4) % 1920, 0)
-      g.setColor(Color.white)
-      g.setStroke(strkLines)
-      if (antiAliasing) g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+    val ty = 0
+    g.setColor(Color.white)
+    g.setStroke(strkLines)
+    if (antiAliasing) g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
 
-      val inTime    = triPhase <= triNumFrames
-      val phase     = triPhase.toDouble / triNumFrames
-//      val fadeIn    = math.min(1.0, phase)
-      val fadeIn    = (math.atan(math.min(1.0, phase) * atanMul1 + atanAdd1) + atanAdd2) * atanMul2
-//      println(fadeIn)
-      val fadeOut   = 1.0 - fadeIn
+    val inTime    = triPhase <= triNumFrames
+    val phase     = triPhase.toDouble / triNumFrames
+    val fadeIn    = (math.atan(math.min(1.0, phase) * atanMul1 + atanAdd1) + atanAdd2) * atanMul2
+    val fadeOut   = 1.0 - fadeIn
 
-      val _ln     = line
-      val _triP   = trianglePrev
-      val _triPSz = numTriPrev
-      val _triN   = anaCurrent.triNext
-      val isEven  = analysisFrames % 2 == 0
-      val _velo   = if (isEven) velocities2 else velocities1
+    val _ln     = line
+    val _triP   = trianglePrev
+    val _triPSz = numTriPrev
+    val _triN   = anaCurrent.triNext
+    val isEven  = analysisFrames % 2 == 0
+    val _velo   = if (isEven) velocities2 else velocities1
 
-      // automatically wraps around visible width.
-      // lines that "break" across the boundary are simply not drawn.
-      def drawLine(x1: Int, y1: Int, x2: Int, y2: Int): Unit = {
+    // automatically wraps around visible width.
+    // lines that "break" across the boundary are simply not drawn.
+    def drawLine(x1: Int, y1: Int, x2: Int, y2: Int): Unit = {
+      if (x1 >= tx2 && x2 >= tx2 && x1 <= bx2 && x2 <= bx2) {
         val b   = x1 <= x2
         val x1m = IntFunctions.wrap(x1, 0, VisibleWidth)
         val x2m = IntFunctions.wrap(x2, 0, VisibleWidth)
@@ -497,140 +548,221 @@ final class View(system: ActorSystem, config: Config, source: ActorRef, loop: Ac
           g.drawLine(x1m, y1, x2m, y2)
         }
       }
+    }
 
-      val accel = config.acceleration.toFloat
-      val fric  = config.friction    .toFloat
+    val accel = config.acceleration.toFloat
+    val fric  = config.friction    .toFloat
 
-      var i = 0
-      if (inTime) while (i < _triPSz) {
-        val tri = _triP(i)
-        
-        _ln.x1 = tri.x1
-        _ln.y1 = tri.y1
-        _ln.x2 = tri.x2
-        _ln.y2 = tri.y2
-        Analyze.resizeLine(_ln, _ln, width = NominalWidth, height = NominalHeight, factor = fadeOut)
-        val x11 = (_ln.x1 * _sx + tx).toInt
+    var i = 0
+    if (inTime) while (i < _triPSz) {
+      val tri = _triP(i)
+
+      _ln.x1 = tri.x1
+      _ln.y1 = tri.y1
+      _ln.x2 = tri.x2
+      _ln.y2 = tri.y2
+      Analyze.resizeLine(_ln, _ln, width = NominalWidth, height = NominalHeight, factor = fadeOut)
+      val x11 = (_ln.x1 * _sx + tx0).toInt
+      val y11 = (_ln.y1 * _sy + ty).toInt
+      val x21 = (_ln.x2 * _sx + tx0).toInt
+      val y21 = (_ln.y2 * _sy + ty).toInt
+      drawLine(x11, y11, x21, y21)
+
+      _ln.x1 = tri.x2
+      _ln.y1 = tri.y2
+      _ln.x2 = tri.x3
+      _ln.y2 = tri.y3
+      Analyze.resizeLine(_ln, _ln, width = NominalWidth, height = NominalHeight, factor = fadeOut)
+      val x12 = (_ln.x1 * _sx + tx0).toInt
+      val y12 = (_ln.y1 * _sy + ty).toInt
+      val x22 = (_ln.x2 * _sx + tx0).toInt
+      val y22 = (_ln.y2 * _sy + ty).toInt
+      drawLine(x12, y12, x22, y22)
+
+      _ln.x1 = tri.x3
+      _ln.y1 = tri.y3
+      _ln.x2 = tri.x1
+      _ln.y2 = tri.y1
+      Analyze.resizeLine(_ln, _ln, width = NominalWidth, height = NominalHeight, factor = fadeOut)
+      val x13 = (_ln.x1 * _sx + tx0).toInt
+      val y13 = (_ln.y1 * _sy + ty).toInt
+      val x23 = (_ln.x2 * _sx + tx0).toInt
+      val y23 = (_ln.y2 * _sy + ty).toInt
+      drawLine(x13, y13, x23, y23)
+
+      i += 1
+    }
+
+    i = 0
+    while (i < _triN.length) {
+      val tri = _triN(i)
+      val v   = _velo(i)
+      if (tri.isIncoherent) {
+        _ln.x1 = v.x1.toInt
+        _ln.y1 = v.y1.toInt
+        _ln.x2 = v.x2.toInt
+        _ln.y2 = v.y2.toInt
+        Analyze.resizeLine(_ln, _ln, width = NominalWidth, height = NominalHeight, factor = fadeIn)
+        val x11 = (_ln.x1 * _sx + tx0).toInt
         val y11 = (_ln.y1 * _sy + ty).toInt
-        val x21 = (_ln.x2 * _sx + tx).toInt
+        val x21 = (_ln.x2 * _sx + tx0).toInt
         val y21 = (_ln.y2 * _sy + ty).toInt
         drawLine(x11, y11, x21, y21)
 
-        _ln.x1 = tri.x2
-        _ln.y1 = tri.y2
-        _ln.x2 = tri.x3
-        _ln.y2 = tri.y3
-        Analyze.resizeLine(_ln, _ln, width = NominalWidth, height = NominalHeight, factor = fadeOut)
-        val x12 = (_ln.x1 * _sx + tx).toInt
+        _ln.x1 = v.x2.toInt
+        _ln.y1 = v.y2.toInt
+        _ln.x2 = v.x3.toInt
+        _ln.y2 = v.y3.toInt
+        Analyze.resizeLine(_ln, _ln, width = NominalWidth, height = NominalHeight, factor = fadeIn)
+        val x12 = (_ln.x1 * _sx + tx0).toInt
         val y12 = (_ln.y1 * _sy + ty).toInt
-        val x22 = (_ln.x2 * _sx + tx).toInt
+        val x22 = (_ln.x2 * _sx + tx0).toInt
         val y22 = (_ln.y2 * _sy + ty).toInt
         drawLine(x12, y12, x22, y22)
 
-        _ln.x1 = tri.x3
-        _ln.y1 = tri.y3
-        _ln.x2 = tri.x1
-        _ln.y2 = tri.y1
-        Analyze.resizeLine(_ln, _ln, width = NominalWidth, height = NominalHeight, factor = fadeOut)
-        val x13 = (_ln.x1 * _sx + tx).toInt
+        _ln.x1 = v.x3.toInt
+        _ln.y1 = v.y3.toInt
+        _ln.x2 = v.x1.toInt
+        _ln.y2 = v.y1.toInt
+        Analyze.resizeLine(_ln, _ln, width = NominalWidth, height = NominalHeight, factor = fadeIn)
+        val x13 = (_ln.x1 * _sx + tx0).toInt
         val y13 = (_ln.y1 * _sy + ty).toInt
-        val x23 = (_ln.x2 * _sx + tx).toInt
+        val x23 = (_ln.x2 * _sx + tx0).toInt
         val y23 = (_ln.y2 * _sy + ty).toInt
         drawLine(x13, y13, x23, y23)
 
-        i += 1
-      }
-
-      i = 0
-      while (i < _triN.length) {
-        val tri = _triN(i)
-        val v   = _velo(i)
-        if (tri.isIncoherent) {
-          _ln.x1 = v.x1.toInt
-          _ln.y1 = v.y1.toInt
-          _ln.x2 = v.x2.toInt
-          _ln.y2 = v.y2.toInt
-          Analyze.resizeLine(_ln, _ln, width = NominalWidth, height = NominalHeight, factor = fadeIn)
-          val x11 = (_ln.x1 * _sx + tx).toInt
-          val y11 = (_ln.y1 * _sy + ty).toInt
-          val x21 = (_ln.x2 * _sx + tx).toInt
-          val y21 = (_ln.y2 * _sy + ty).toInt
-          drawLine(x11, y11, x21, y21)
-
-          _ln.x1 = v.x2.toInt
-          _ln.y1 = v.y2.toInt
-          _ln.x2 = v.x3.toInt
-          _ln.y2 = v.y3.toInt
-          Analyze.resizeLine(_ln, _ln, width = NominalWidth, height = NominalHeight, factor = fadeIn)
-          val x12 = (_ln.x1 * _sx + tx).toInt
-          val y12 = (_ln.y1 * _sy + ty).toInt
-          val x22 = (_ln.x2 * _sx + tx).toInt
-          val y22 = (_ln.y2 * _sy + ty).toInt
-          drawLine(x12, y12, x22, y22)
-
-          _ln.x1 = v.x3.toInt
-          _ln.y1 = v.y3.toInt
-          _ln.x2 = v.x1.toInt
-          _ln.y2 = v.y1.toInt
-          Analyze.resizeLine(_ln, _ln, width = NominalWidth, height = NominalHeight, factor = fadeIn)
-          val x13 = (_ln.x1 * _sx + tx).toInt
-          val y13 = (_ln.y1 * _sy + ty).toInt
-          val x23 = (_ln.x2 * _sx + tx).toInt
-          val y23 = (_ln.y2 * _sy + ty).toInt
-          drawLine(x13, y13, x23, y23)
-
-        } else {
+      } else {
 //          val f    = 0.01f
 //          val r    = 0.98f
-          val ax1  = (tri.x1 - v.x1) * accel
-          v.vx1    = (v.vx1 + ax1) * fric
-          v.x1    += v.vx1
-          val ay1  = (tri.y1 - v.y1) * accel
-          v.vy1    = (v.vy1 + ay1) * fric
-          v.y1    += v.vy1
-          val ax2  = (tri.x2 - v.x2) * accel
-          v.vx2    = (v.vx2 + ax2) * fric
-          v.x2    += v.vx2
-          val ay2  = (tri.y2 - v.y2) * accel
-          v.vy2    = (v.vy2 + ay2) * fric
-          v.y2    += v.vy2
-          val ax3  = (tri.x3 - v.x3) * accel
-          v.vx3    = (v.vx3 + ax3) * fric
-          v.x3    += v.vx3
-          val ay3  = (tri.y3 - v.y3) * accel
-          v.vy3    = (v.vy3 + ay3) * fric
-          v.y3    += v.vy3
+        val ax1  = (tri.x1 - v.x1) * accel
+        v.vx1    = (v.vx1 + ax1) * fric
+        v.x1    += v.vx1
+        val ay1  = (tri.y1 - v.y1) * accel
+        v.vy1    = (v.vy1 + ay1) * fric
+        v.y1    += v.vy1
+        val ax2  = (tri.x2 - v.x2) * accel
+        v.vx2    = (v.vx2 + ax2) * fric
+        v.x2    += v.vx2
+        val ay2  = (tri.y2 - v.y2) * accel
+        v.vy2    = (v.vy2 + ay2) * fric
+        v.y2    += v.vy2
+        val ax3  = (tri.x3 - v.x3) * accel
+        v.vx3    = (v.vx3 + ax3) * fric
+        v.x3    += v.vx3
+        val ay3  = (tri.y3 - v.y3) * accel
+        v.vy3    = (v.vy3 + ay3) * fric
+        v.y3    += v.vy3
 
-          val x1   = (v.x1 * _sx + tx).toInt
-          val y1   = (v.y1 * _sy + ty).toInt
-          val x2   = (v.x2 * _sx + tx).toInt
-          val y2   = (v.y2 * _sy + ty).toInt
-          val x3   = (v.x3 * _sx + tx).toInt
-          val y3   = (v.y3 * _sy + ty).toInt
-          drawLine(x1, y1, x2, y2)
-          drawLine(x2, y2, x3, y3)
-          drawLine(x3, y3, x1, y1)
-        }
-        i += 1
+        val x1   = (v.x1 * _sx + tx0).toInt
+        val y1   = (v.y1 * _sy + ty).toInt
+        val x2   = (v.x2 * _sx + tx0).toInt
+        val y2   = (v.y2 * _sy + ty).toInt
+        val x3   = (v.x3 * _sx + tx0).toInt
+        val y3   = (v.y3 * _sy + ty).toInt
+        drawLine(x1, y1, x2, y2)
+        drawLine(x2, y2, x3, y3)
+        drawLine(x3, y3, x1, y1)
       }
+      i += 1
+    }
 
-      triPhase += 1
-      if (triPhase >= triNumFrames && anaPending != null) {
-        setCurrentAnalysis(anaPending)
-        anaPending  = null
-        loop ! Source.Task
+    triPhase += 1
+    if (triPhase >= triNumFrames && anaPending != null) {
+      setCurrentAnalysis(anaPending)
+      anaPending  = null
+      loop ! Source.Task
+    }
+
+    {
+      val foo0 = IntFunctions.wrap(rx0, 0, VisibleWidth)
+      val foo1 = IntFunctions.wrap(rx1, 0, VisibleWidth)
+      if (foo0 <= foo1) {
+        STAT_HH_SPACE += foo1 - foo0
+        STAT_DP_SPACE += foo0
+        STAT_DP_SPACE += VisibleWidth - foo1
+      } else {
+        STAT_HH_SPACE += VisibleWidth - foo0
+        STAT_HH_SPACE += foo1
+        STAT_DP_SPACE += foo0
+        STAT_DP_SPACE += foo0 - foo1
       }
     }
+    STAT_DP_SPACE += (rx1 - rx0)
+
+    // 0 - open black (rattle) rectangle, do not pan
+    // 1 - expand black rectangle and pan at the same time
+    // 2 - halt black rectangle and keep panning
+    // 3 - shrink black rectangle / erase traces
+    // then repeat
+    (algoStage: @switch) match {
+      case 0 =>
+        rattleRectX1 += wvRecip
+        triRectX1    += wvRecip
+        if (triRectX1 - triRectX0 >= fullTriWidth) algoStage += 1
+
+      case 1 =>
+        rattleRectX1 = math.min(rattleRectX0 + VisibleWidth, rattleRectX1 + cvRecip)
+        triRectX0    += cvRecip
+        triRectX1    += cvRecip
+//        if (rattleRectX1 - rattleRectX0 >= VisibleWidth) algoStage += 1
+        if (triRectX1 >= VisibleWidth) algoStage += 1
+
+      case 2 =>
+        triRectX0    += wvRecip
+        if (triRectX0 >= triRectX1) algoStage += 1
+
+      case 3 =>
+        triRectX0    += wvRecip
+        val x1  = rattleRectX0.toInt
+        rattleRectX0 += wvRecip
+        val x2  = rattleRectX0.toInt + 1
+        val x1m = IntFunctions.wrap(x1, 0, VisibleWidth)
+        val x2m = IntFunctions.wrap(x2, 0, VisibleWidth)
+
+        g.setColor(Color.black)
+        if (x1m <= x2m) {
+          g.fillRect(x1m, 0, x2m - x1m, VisibleHeight)
+        } else {
+          g.fillRect(x1m, 0, VisibleWidth - x1m, VisibleHeight)
+          g.fillRect(0, 0, x2m, VisibleHeight)
+        }
+
+        if (rattleRectX0 >= rattleRectX1) {
+          val STAT_TOT = (STAT_DP_SPACE + STAT_HH_SPACE).toDouble
+          println(f"DP space = ${STAT_DP_SPACE} or ${STAT_DP_SPACE / STAT_TOT * 100}%1.1f")
+          println(f"HH space = ${STAT_HH_SPACE} or ${STAT_HH_SPACE / STAT_TOT * 100}%1.1f")
+          resetStage()
+        }
+    }
+
 
     if (drawRect) {
-      g.fillRect(0, 0, VisibleWidth, 10)
-      g.fillRect(0, VisibleHeight - 10, VisibleWidth, 10)
-      g.fillRect(0, 10, 10, VisibleHeight - 20)
-      g.fillRect(VisibleWidth - 10, 10, 10, VisibleHeight - 20)
-
-      g.setColor(Color.gray)
-      g.fillRect(VisibleWidth/2 - 10, 10, 20, VisibleHeight - 20)
+      //      g.fillRect(0, 0, VisibleWidth, 10)
+      //      g.fillRect(0, VisibleHeight - 10, VisibleWidth, 10)
+      //      g.fillRect(0, 10, 10, VisibleHeight - 20)
+      //      g.fillRect(VisibleWidth - 10, 10, 10, VisibleHeight - 20)
+      //
+      //      g.setColor(Color.gray)
+      //      g.fillRect(VisibleWidth/2 - 10, 10, 20, VisibleHeight - 20)
+      val foo0 = IntFunctions.wrap(rx0, 0, VisibleWidth)
+      val foo1 = IntFunctions.wrap(rx1, 0, VisibleWidth)
+      if (foo0 <= foo1) {
+        g.setColor(Color.red)
+        g.fillRect(foo0, 0, foo1 - foo0, 32)
+        g.setColor(Color.green)
+        g.fillRect(0, 0, foo0, 32)
+        g.fillRect(foo1, 0, VisibleWidth - foo1, 32)
+      } else {
+        g.setColor(Color.red)
+        g.fillRect(foo0, 0, VisibleWidth - foo0, VisibleHeight)
+        g.fillRect(0, 0, foo1, VisibleHeight)
+        g.setColor(Color.green)
+        g.fillRect(0, 0, foo0, 32)
+        g.fillRect(foo1, 0, foo0 - foo1, 32)
+      }
     }
+
+    // println(f"algo $algoStage tx0 $triRectX0%g tx1 $triRectX1%g rx0 $rattleRectX0%g, rx1 $rattleRectX1%g")
   }
 
   def quit(): Unit = {

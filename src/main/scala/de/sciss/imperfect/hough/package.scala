@@ -13,6 +13,7 @@
 
 package de.sciss.imperfect
 
+import java.awt.Color
 import java.awt.image.BufferedImage
 import java.text.SimpleDateFormat
 import java.util.{Date, Locale}
@@ -29,8 +30,14 @@ package object hough {
   final val NominalHeight = 1080
   final val VisibleWidth  = 3840
   final val VisibleHeight =  540
-  final val OffScreenImg  = new BufferedImage(VisibleWidth, VisibleHeight, BufferedImage.TYPE_BYTE_GRAY)
-  final val OffScreenG    = OffScreenImg.createGraphics()
+//  final val OffScreenImg  = new BufferedImage(VisibleWidth, VisibleHeight, BufferedImage.TYPE_BYTE_GRAY)
+  final val OffScreenImg  = new BufferedImage(VisibleWidth, VisibleHeight, BufferedImage.TYPE_INT_ARGB)
+  final val OffScreenG    = {
+    val res = OffScreenImg.createGraphics()
+    res.setColor(Color.black)
+    res.fillRect(0, 0, VisibleWidth, VisibleHeight)
+    res
+  }
 
   @elidable(CONFIG) def log(what: => String): Unit =
     if (showLog) Console.out.println(s"${logHeader.format(new Date())}$what")

@@ -1,5 +1,5 @@
 name         := "ImperfectHough"
-version      := "0.1.0"
+version      := "0.1.2-SNAPSHOT"
 description  := "An algorithmic art project (video installation)"
 organization := "de.sciss"
 homepage     := Some(url(s"https://github.com/Sciss/${name.value}"))
@@ -17,7 +17,3 @@ libraryDependencies ++= Seq(
   "com.github.scopt"  %% "scopt"      % "3.5.0",
   "com.typesafe.akka" %% "akka-actor" % "2.4.12"
 )
-
-// javaCppPresetLibs ++= Seq(
-//   "ffmpeg" -> "3.1.2"
-// )
