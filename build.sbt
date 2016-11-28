@@ -1,5 +1,5 @@
 name         := "ImperfectHough"
-version      := "0.1.2"
+version      := "0.1.3"
 description  := "An algorithmic art project (video installation)"
 organization := "de.sciss"
 homepage     := Some(url(s"https://github.com/Sciss/${name.value}"))

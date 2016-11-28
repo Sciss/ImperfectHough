@@ -27,6 +27,8 @@ import de.sciss.imperfect.hough.MainLoop.Start
 import de.sciss.imperfect.hough.Source.Analysis
 import de.sciss.imperfect.hough.View.Config
 import de.sciss.numbers.IntFunctions
+import de.sciss.osc
+import de.sciss.osc.UDP
 
 import scala.annotation.switch
 import scala.swing.Swing
@@ -62,7 +64,9 @@ object View {
       rattlePad     : Int           = 64,
       rattleDump    : Boolean       = false,
       useRattle     : Boolean       = false,
-      logging       : Boolean       = false
+      logging       : Boolean       = false,
+      oscPort       : Int           = 57120,
+      useOSC        : Boolean       = true
     )
 
   private val default = Config()
@@ -179,12 +183,22 @@ object View {
       opt[Unit] ("log")
         .text ("Enable debug logging")
         .action   { (v, c) => c.copy(logging = true) }
+
+      opt[Unit] ("no-osc")
+        .text ("Disable OSC receiver")
+        .action   { (v, c) => c.copy(useOSC = false) }
+
+      opt[Int] ("osc-port")
+        .text (s"OSC receiver port (default: ${default.oscPort})")
+        .action   { (v, c) => c.copy(oscPort = v) }
     }
     p.parse(args, Config()).fold(sys.exit(1)) { config =>
       if (config.listScreens) {
         printScreens(Console.out)
         sys.exit()
       }
+
+      if (config.useOSC) createOSC(config.oscPort)
 
       val system      = ActorSystem("system")
       if (!config.logging) system.eventStream.setLogLevel(Logging.WarningLevel)
@@ -197,6 +211,22 @@ object View {
           view.run()
         }
       })
+    }
+  }
+
+  def createOSC(port: Int): Unit = {
+    val config = UDP.Config()
+    config.localPort = port
+    val r = UDP.Receiver(config)
+    r.action = {
+      case (osc.Message("/reboot"  ), _) =>
+        import sys.process._
+        Seq("sudo", "reboot", "now").!
+      case (osc.Message("/shutdown"), _) =>
+        import sys.process._
+        Seq("sudo", "shutdown", "now").!
+      case (other, addr) =>
+        Console.err.println(s"Received unknown OSC packet $other from $addr")
     }
   }
 
